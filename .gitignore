@@ -1,0 +1,48 @@
+# ── Claude / editor ──
+.claude/
+.DS_Store
+._*
+**/.DS_Store
+**/._*
+
+# ── Python ──
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.env
+
+# ── Virtual envs ──
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+
+# ── Database & uploads ──
+*.db
+*.sqlite
+*.sqlite3
+backend/uploads/
+
+# ── Logs & build artifacts ──
+*.log
+pip_out.txt
+backend/pip_out.txt
+backend/server.log
+backend/uvicorn*.log
+frontend/vite.log
+frontend/vite_output.txt
+frontend/crash.log
+
+# ── Large binaries ──
+backend/bin/ffmpeg
+
+# ── Frontend build ──
+frontend/dist/
+frontend/node_modules/
+node_modules/
+frontend_node_modules_broken*/
+
+# ── Misc ──
+travel_map.db
