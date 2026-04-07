@@ -46,30 +46,77 @@
                   <span class="email-toggle-label">{{ showEmail ? '已公开' : '已隐藏' }}</span>
                 </div>
               </div>
-              <button
-                v-if="!isOwnProfile"
-                class="btn-message"
-                @click="handleSendMessage"
-              >
-                💬 发私信
-              </button>
+              <div v-if="!isOwnProfile" class="profile-actions">
+                <button
+                  class="btn-follow"
+                  :class="{ following: isFollowing, mutual: isMutual }"
+                  :disabled="followLoading"
+                  style="color:#000;font-weight:700;font-size:13px;"
+                  @click="toggleFollow"
+                >
+                  {{ isMutual ? '💞 互相关注' : isFollowing ? '✓ 已关注' : '+ 关注' }}
+                </button>
+                <button class="btn-message" @click="handleSendMessage">💬 发私信</button>
+              </div>
             </div>
           </div>
 
           <div class="stats-row">
-            <div class="stat-card">
-              <span class="stat-number">{{ stats.total_places }}</span>
-              <span class="stat-label">个地点</span>
+            <!-- 粉丝 -->
+            <div
+              class="stat-card"
+              :class="{ 'stat-clickable': isOwnProfile || showFollowers }"
+              @click="openFollowList('followers')"
+            >
+              <span class="stat-number">{{ followersCount }}</span>
+              <div class="stat-label-row">
+                <span class="stat-label">粉丝</span>
+                <span v-if="!showFollowers" class="stat-lock" title="已私密">🔒</span>
+              </div>
+              <button
+                v-if="isOwnProfile"
+                class="stat-privacy-btn"
+                :title="showFollowers ? '设为私密' : '设为公开'"
+                @click.stop="toggleFollowPrivacy('followers')"
+              >{{ showFollowers ? '公开' : '私密' }}</button>
             </div>
+
+            <!-- 关注 -->
+            <div
+              class="stat-card"
+              :class="{ 'stat-clickable': isOwnProfile || showFollowing }"
+              @click="openFollowList('following')"
+            >
+              <span class="stat-number">{{ followingCount }}</span>
+              <div class="stat-label-row">
+                <span class="stat-label">关注</span>
+                <span v-if="!showFollowing" class="stat-lock" title="已私密">🔒</span>
+              </div>
+              <button
+                v-if="isOwnProfile"
+                class="stat-privacy-btn"
+                :title="showFollowing ? '设为私密' : '设为公开'"
+                @click.stop="toggleFollowPrivacy('following')"
+              >{{ showFollowing ? '公开' : '私密' }}</button>
+            </div>
+
             <div class="stat-card">
               <span class="stat-number">{{ stats.total_checkins }}</span>
               <span class="stat-label">次打卡</span>
             </div>
             <div class="stat-card">
-              <span class="stat-number">{{ stats.total_photos }}</span>
-              <span class="stat-label">张照片</span>
+              <span class="stat-number">{{ stats.total_places }}</span>
+              <span class="stat-label">个地点</span>
             </div>
           </div>
+
+          <!-- Follow list modal -->
+          <FollowListModal
+            v-if="followListModal"
+            :userId="user.id"
+            :type="followListModal"
+            @close="followListModal = null"
+          />
         </div>
 
         <div class="section-card glass-card" v-if="checkins.length">
@@ -199,6 +246,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { getUser, getUserStats, uploadAvatar, updateShowEmail } from '../api/users'
 import { addComment, deleteCheckin, getComments, getUserCheckins, likeCheckin, unlikeCheckin } from '../api/checkins'
+import { followUser, unfollowUser, getFollowStatus, updateFollowPrivacy } from '../api/follows'
+import FollowListModal from '../components/FollowListModal.vue'
 import { formatCheckinDate, formatDate, getImageUrl } from '../lib/checkins'
 import { loadAmap } from '../lib/amap'
 import { useUserStore } from '../stores/user'
@@ -279,6 +328,71 @@ const user = ref(null)
 const stats = ref({ total_checkins: 0, total_places: 0, total_photos: 0 })
 const checkins = ref([])
 const loading = ref(true)
+
+// Follow state
+const isFollowing = ref(false)
+const isMutual = ref(false)
+const followersCount = ref(0)
+const followingCount = ref(0)
+const followLoading = ref(false)
+const showFollowers = ref(true)   // target user's privacy setting
+const showFollowing = ref(true)
+const followListModal = ref(null) // null | 'followers' | 'following'
+
+async function openFollowList(type) {
+  // For own profile always open; for others check privacy
+  if (!isOwnProfile.value) {
+    if (type === 'followers' && !showFollowers.value) {
+      return  // locked, don't open
+    }
+    if (type === 'following' && !showFollowing.value) {
+      return
+    }
+  }
+  followListModal.value = type
+}
+
+async function toggleFollowPrivacy(field) {
+  try {
+    const payload = {}
+    if (field === 'followers') {
+      showFollowers.value = !showFollowers.value
+      payload.show_followers = showFollowers.value
+    } else {
+      showFollowing.value = !showFollowing.value
+      payload.show_following = showFollowing.value
+    }
+    await updateFollowPrivacy(payload)
+  } catch {
+    // revert
+    if (field === 'followers') showFollowers.value = !showFollowers.value
+    else showFollowing.value = !showFollowing.value
+  }
+}
+
+async function toggleFollow() {
+  if (!userStore.isLoggedIn) {
+    ElMessage.info('请先登录')
+    return
+  }
+  followLoading.value = true
+  try {
+    if (isFollowing.value) {
+      await unfollowUser(user.value.id)
+      isFollowing.value = false
+      isMutual.value = false
+      followersCount.value = Math.max(0, followersCount.value - 1)
+    } else {
+      await followUser(user.value.id)
+      isFollowing.value = true
+      followersCount.value += 1
+    }
+  } catch {
+    ElMessage.error('操作失败，请重试')
+  } finally {
+    followLoading.value = false
+  }
+}
 const footprintMapRef = ref(null)
 const commentsOpen = ref({})
 const commentsLoading = ref({})
@@ -475,6 +589,8 @@ async function loadData({ showLoading = true } = {}) {
     user.value = userRes.data
     stats.value = statsRes.data
     checkins.value = checkinsRes.data
+    showFollowers.value = userRes.data.show_followers ?? true
+    showFollowing.value = userRes.data.show_following ?? true
     if (isOwnProfile.value) showEmail.value = userRes.data.show_email ?? true
 
     await nextTick()
@@ -485,6 +601,17 @@ async function loadData({ showLoading = true } = {}) {
     if (showLoading) {
       loading.value = false
     }
+  }
+
+  // Load follow status separately — must not block profile rendering
+  try {
+    const followRes = await getFollowStatus(userId)
+    isFollowing.value = followRes.data.is_following
+    isMutual.value = followRes.data.is_mutual
+    followersCount.value = followRes.data.followers_count
+    followingCount.value = followRes.data.following_count
+  } catch {
+    // silently ignore — follow status is non-critical
   }
 }
 
@@ -712,11 +839,53 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 18px;
+  background: #f0f0f0;
+  border: 1.5px solid #222;
+  border-radius: var(--radius-full);
+  color: #000 !important;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--fast), opacity var(--fast);
+}
+.btn-follow:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+.btn-follow:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-follow.following {
+  background: #f5f5f5;
+  border: 1.5px solid #888;
+  color: #000 !important;
+}
+.btn-follow.following:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #000 !important;
+  border-color: #f87171;
+}
+.btn-follow.mutual {
+  background: #f0eeff;
+  border: 1.5px solid #667eea;
+  color: #000 !important;
+}
+
 .btn-message {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 12px;
   padding: 8px 18px;
   background: var(--brand-light);
   border: 1.5px solid rgba(232, 93, 4, 0.18);
@@ -777,6 +946,45 @@ onBeforeUnmount(() => {
   color: var(--ink-500);
   margin-top: 4px;
   font-weight: 500;
+}
+
+.stat-clickable {
+  cursor: pointer;
+}
+.stat-clickable:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 16px rgba(232, 93, 4, 0.15);
+}
+
+.stat-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.stat-lock {
+  font-size: 11px;
+}
+
+.stat-privacy-btn {
+  margin-top: 6px;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--ink-200, #ccc);
+  background: var(--bg-surface);
+  color: var(--ink-500);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.stat-privacy-btn:hover {
+  background: var(--bg-muted);
+  color: var(--ink-800);
 }
 
 /* ── Section cards ── */

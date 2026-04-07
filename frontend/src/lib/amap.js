@@ -1,6 +1,7 @@
 import AMapLoader from '@amap/amap-jsapi-loader'
 
 import { AMAP_KEY, AMAP_SECURITY_JS_CODE } from './config'
+import { normalizeAddressName, normalizeCityName } from './region'
 
 let amapPromise
 const INVALID_CITY_NAMES = new Set(['市辖区', '县', '城区'])
@@ -110,8 +111,8 @@ export async function reverseGeocodeWithAmap(latitude, longitude) {
       }
 
       const regeocode = result.regeocode
-      const city = extractCityFromRegeocode(regeocode)
-      const address = normalizeAmapText(regeocode.formattedAddress)
+      const city = normalizeCityName(extractCityFromRegeocode(regeocode))
+      const address = normalizeAddressName(normalizeAmapText(regeocode.formattedAddress))
 
       resolve({ city, address })
     })

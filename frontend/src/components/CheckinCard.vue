@@ -20,7 +20,7 @@
           </div>
           <div class="user-meta">
             <div class="username">{{ checkin.user_nickname }}</div>
-            <div class="meta">{{ checkin.city }} · {{ formatDate(checkin.created_at) }}</div>
+            <div class="meta">{{ displayCity }} · {{ formatDate(checkin.created_at) }}</div>
           </div>
         </div>
       </div>
@@ -82,6 +82,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user.js'
 import { likeCheckin, unlikeCheckin, getComments, addComment } from '../api/checkins.js'
 import { getImageUrl } from '../lib/checkins'
+import { normalizeCityName } from '../lib/region'
 
 const props = defineProps({
   checkin: { type: Object, required: true }
@@ -102,6 +103,8 @@ const avatarStyle = computed(() => {
     background: `linear-gradient(135deg, hsl(${hue}, 65%, 52%), hsl(${(hue + 40) % 360}, 70%, 42%))`
   }
 })
+
+const displayCity = computed(() => normalizeCityName(props.checkin.city || ''))
 
 function photoUrl(url) {
   return getImageUrl(url)

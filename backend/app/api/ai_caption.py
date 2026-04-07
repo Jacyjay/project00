@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.deps import get_current_user
 from app.models.user import User
+from app.services.region_normalizer import normalize_city_name
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -146,7 +147,7 @@ async def generate_caption(
                 break
 
     has_images = bool(optimized_images)
-    city = (req.city or "未填写城市").strip()[:24]
+    city = normalize_city_name((req.city or "未填写城市").strip())[:24]
     location_name = (req.location_name or "未命名地点").strip()[:36]
     image_hint = "请参考图片氛围，但不要逐项描述画面。" if has_images else "没有图片时只根据地点信息生成。"
 

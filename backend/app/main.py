@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine, async_session_maker
-from app.models import User, Place, Checkin, Photo, Message, FootprintReport  # noqa: import all models
+from app.models import User, Place, Checkin, Photo, Message, FootprintReport, Follow  # noqa: import all models
 from app.models.social import Like, Comment  # noqa: import social models for table creation
 from app.api.auth import router as auth_router
 from app.api.places import router as places_router
@@ -20,6 +20,7 @@ from app.api.messages import router as messages_router
 from app.api.uploads import router as uploads_router
 from app.api import social, ai_caption
 from app.api.footprint_report import router as footprint_report_router
+from app.api.follows import router as follows_router
 from app.services.city_intro import ensure_city_intro
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ app.include_router(uploads_router)
 app.include_router(social.router, prefix="/api", tags=["social"])
 app.include_router(ai_caption.router, prefix="/api", tags=["ai"])
 app.include_router(footprint_report_router)
+app.include_router(follows_router)
 
 
 @app.get("/")

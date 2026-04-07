@@ -46,15 +46,18 @@ onMounted(async () => {
   min-height: 0;
   overflow: hidden;
   position: relative;
+  padding-top: 64px;
   padding-bottom: calc(100px + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
 .app-main.chromeless {
+  padding-top: 0;
   padding-bottom: 0;
 }
 
 .app-main.immersive {
+  padding-top: 64px;
   padding-bottom: 0;
 }
 </style>

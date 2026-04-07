@@ -14,6 +14,7 @@ from app.crud.user import get_user_by_id
 from app.schemas.message import MessageOut, MessageCreate, ConversationOut
 from app.models.user import User
 from app.models.message import Message
+from app.models.follow import Follow
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -55,11 +56,14 @@ async def list_conversations(
 ):
     messages = await get_conversations(db, current_user.id)
     result = []
+    seen_partner_ids = set()
+
     for msg in messages:
         is_sender = msg.sender_id == current_user.id
         partner = msg.receiver if is_sender else msg.sender
         if not partner:
             continue
+        seen_partner_ids.add(partner.id)
         unread_res = await db.execute(
             select(func.count(Message.id)).where(
                 and_(
@@ -78,6 +82,39 @@ async def list_conversations(
             last_message_time=_ensure_utc(msg.created_at),
             unread_count=unread,
         ))
+
+    # Also include mutual followers who haven't messaged yet
+    following_ids = [
+        row[0] for row in (await db.execute(
+            select(Follow.following_id).where(Follow.follower_id == current_user.id)
+        )).all()
+    ]
+    if following_ids:
+        mutual_ids = [
+            row[0] for row in (await db.execute(
+                select(Follow.follower_id).where(
+                    and_(
+                        Follow.follower_id.in_(following_ids),
+                        Follow.following_id == current_user.id,
+                    )
+                )
+            )).all()
+        ]
+        for mid in mutual_ids:
+            if mid in seen_partner_ids:
+                continue
+            partner = await db.get(User, mid)
+            if not partner:
+                continue
+            result.append(ConversationOut(
+                partner_id=partner.id,
+                partner_nickname=partner.nickname,
+                partner_avatar=partner.avatar_url,
+                last_message="互相关注，开始聊天吧 👋",
+                last_message_time=_ensure_utc(datetime.now(timezone.utc)),
+                unread_count=0,
+            ))
+
     return result
 
 

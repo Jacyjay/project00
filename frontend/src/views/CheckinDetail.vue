@@ -22,8 +22,8 @@
                 {{ checkin.is_public ? '公开' : '私密' }}
               </span>
             </div>
-            <p v-if="checkin.city || checkin.address" class="checkin-address">
-              📍 {{ checkin.city || checkin.address }}
+            <p v-if="displayCity || displayAddress" class="checkin-address">
+              📍 {{ displayCity || displayAddress }}
             </p>
             <div class="checkin-meta">
               <router-link :to="`/profile/${checkin.user_id}`" class="meta-user">
@@ -43,10 +43,10 @@
         </div>
 
         <!-- City intro (always expanded, directly below header) -->
-        <div v-if="checkin.city" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.08s; animation-fill-mode: both;">
+        <div v-if="displayCity" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.08s; animation-fill-mode: both;">
           <h2 class="section-title">
             <span class="section-icon">🏙️</span>
-            {{ checkin.city }} 城市印象
+            {{ displayCity }} 城市印象
           </h2>
           <div class="city-intro-body">
             <p v-if="cityIntro" class="city-intro-text">{{ cityIntro }}</p>
@@ -131,7 +131,8 @@
               <span>{{ likesCount > 0 ? likesCount : '点赞' }}</span>
             </button>
             <span class="comment-stat">💬 {{ commentsCount }} 条评论</span>
-            <button class="share-btn" @click="copyLink">{{ copyDone ? '✅ 已复制' : '🔗 分享' }}</button>
+            <button class="share-btn" @click="copyLink">{{ copyDone ? '✅ 已复制' : '🔗 链接' }}</button>
+            <button class="share-btn share-btn-poster" @click="showShareCard = true">🖼 海报</button>
           </div>
 
           <div class="comments-section">
@@ -214,6 +215,13 @@
         </div>
       </div>
     </transition>
+
+    <!-- Share card modal -->
+    <ShareCard
+      v-if="showShareCard && checkin"
+      :checkin="checkin"
+      @close="showShareCard = false"
+    />
   </div>
 </template>
 
@@ -224,8 +232,10 @@ import { ElMessage } from 'element-plus'
 
 import { getCheckin, likeCheckin, unlikeCheckin, getComments, addComment, deleteComment, updateCheckin, deleteCheckin, getCityIntro } from '../api/checkins'
 import { formatCheckinDate, formatCoordinates, getImageUrl } from '../lib/checkins'
+import { normalizeAddressName, normalizeCityName } from '../lib/region'
 import { useUserStore } from '../stores/user.js'
 import { useRouter } from 'vue-router'
+import ShareCard from '../components/ShareCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -239,6 +249,8 @@ const showPreview = ref(false)
 const previewUrl = ref('')
 const cityIntro = ref(null)
 const cityIntroLoading = ref(false)
+const displayCity = computed(() => normalizeCityName(checkin.value?.city || ''))
+const displayAddress = computed(() => normalizeAddressName(checkin.value?.address || ''))
 
 const isLiked = ref(false)
 const likesCount = ref(0)
@@ -295,6 +307,7 @@ async function handleDelete() {
 
 // Share
 const copyDone = ref(false)
+const showShareCard = ref(false)
 function copyLink() {
   navigator.clipboard?.writeText(window.location.href).then(() => {
     copyDone.value = true
@@ -390,10 +403,10 @@ async function loadData() {
     await loadSocialData(checkin.value.id)
 
     // Auto-load city intro
-    if (checkin.value?.city) {
+    if (displayCity.value) {
       cityIntroLoading.value = true
       try {
-        const introRes = await getCityIntro(checkin.value.city)
+        const introRes = await getCityIntro(displayCity.value)
         cityIntro.value = introRes.data.intro || null
       } catch { /* silently ignore */ }
       finally { cityIntroLoading.value = false }
@@ -864,6 +877,17 @@ onMounted(loadData)
 .share-btn:hover {
   background: var(--bg-muted);
   color: var(--ink-900);
+}
+
+.share-btn-poster {
+  margin-left: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(118, 75, 162, 0.12));
+  border-color: rgba(102, 126, 234, 0.3);
+  color: #7c6fe0;
+}
+.share-btn-poster:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.22), rgba(118, 75, 162, 0.22));
+  color: #6c5ce7;
 }
 
 /* ── Social bar ── */

@@ -187,6 +187,14 @@ const bottomNavItems = computed(() => [
     to: { name: 'home' },
   },
   {
+    key: 'feed',
+    label: '动态',
+    icon: '✨',
+    to: userStore.isLoggedIn
+      ? { name: 'Feed' }
+      : { name: 'login', query: { redirect: '/feed' } },
+  },
+  {
     key: 'footprint',
     label: '足迹',
     icon: '👣',
@@ -199,6 +207,7 @@ const bottomNavItems = computed(() => [
 function isNavActive(key) {
   if (key === 'home') return route.name === 'home'
   if (key === 'messages') return route.name === 'messages' || route.name === 'chat'
+  if (key === 'feed') return route.name === 'Feed'
   if (key === 'footprint') return route.name === 'MyFootprint'
   return false
 }
@@ -464,17 +473,22 @@ onUnmounted(() => {
 <style scoped>
 /* ─── Shell ── */
 .app-header-shell {
-  position: relative;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 1100;
+  background: #ffffff;
+  box-shadow: 0 1px 0 rgba(120, 82, 52, 0.08);
 }
 
 /* ─── Top header ── */
 .app-header {
   position: relative;
   z-index: 1100;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--ink-100);
-  box-shadow: 0 1px 0 var(--ink-50);
+  background: #ffffff;
+  border-bottom: 1px solid rgba(120, 82, 52, 0.06);
+  box-shadow: none;
 }
 
 .header-inner {

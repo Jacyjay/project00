@@ -9,9 +9,22 @@ from app.models.checkin import Checkin
 from app.models.user import User
 from app.models.photo import Photo
 from app.services.city_intro import ensure_city_intro, get_city_intro
+from app.services.region_normalizer import normalize_city_name
 from pydantic import BaseModel
 
 router = APIRouter()
+
+
+def _merge_city_rows(rows):
+    merged = {}
+    for row in rows:
+        city = normalize_city_name(row.city)
+        if not city:
+            continue
+        if city not in merged:
+            merged[city] = {"city": city, "count": 0}
+        merged[city]["count"] += row.count
+    return sorted(merged.values(), key=lambda item: item["count"], reverse=True)[:5]
 
 # ─── schemas ───────────────────────────────────────────────────────────────
 
@@ -182,8 +195,8 @@ async def get_hot_cities(db: AsyncSession = Depends(get_db)):
         .limit(5)
     )
     today_cities = [
-        {"city": row.city, "count": row.count, "intro": get_city_intro(row.city)}
-        for row in today_result.all()
+        {**item, "intro": get_city_intro(item["city"])}
+        for item in _merge_city_rows(today_result.all())
     ]
 
     # Historical hot cities (top 5, all time)
@@ -199,8 +212,8 @@ async def get_hot_cities(db: AsyncSession = Depends(get_db)):
         .limit(5)
     )
     hist_cities = [
-        {"city": row.city, "count": row.count, "intro": get_city_intro(row.city)}
-        for row in hist_result.all()
+        {**item, "intro": get_city_intro(item["city"])}
+        for item in _merge_city_rows(hist_result.all())
     ]
 
     # Trigger background generation for any city not yet cached
@@ -214,6 +227,7 @@ async def get_hot_cities(db: AsyncSession = Depends(get_db)):
 @router.get("/cities/{city}/intro")
 async def get_city_intro_endpoint(city: str):
     """Return the cached AI intro for a city. Triggers background generation if not yet cached."""
+    city = normalize_city_name(city)
     intro = get_city_intro(city)
     ensure_city_intro(city)
     return {"city": city, "intro": intro}
@@ -228,6 +242,7 @@ async def get_city_checkins(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
+    city = normalize_city_name(city)
     offset = (page - 1) * page_size
 
     # Build base query

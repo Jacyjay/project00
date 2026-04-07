@@ -14,6 +14,8 @@ class User(Base):
     avatar_url: Mapped[str] = mapped_column(String(500), nullable=True, default=None)
     bio: Mapped[str] = mapped_column(String(200), nullable=True, default=None)
     show_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    show_followers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    show_following: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

@@ -90,8 +90,8 @@
                 <div class="place-search-main">
                   <div class="place-search-name">{{ place.name }}</div>
                   <div class="place-search-meta">
-                    <span v-if="place.city">{{ place.city }}</span>
-                    <span v-if="place.address">{{ place.address }}</span>
+                    <span v-if="place.city">{{ normalizeCityName(place.city) }}</span>
+                    <span v-if="place.address">{{ normalizeAddressName(place.address) }}</span>
                   </div>
                 </div>
               </div>
@@ -136,27 +136,6 @@
         <span class="pick-copy">点击地图任意位置，带着坐标去填写打卡信息。</span>
       </div>
     </transition>
-
-    <div v-if="!userStore.isLoggedIn" :class="['hot-cities-stack', 'is-guest']">
-      <button
-        type="button"
-        :class="['hot-rank-trigger glass-card', { active: hotCitiesOpen }]"
-        id="btn-hot-rank"
-        @click="toggleHotCities"
-      >
-        <span class="trigger-icon">🔥</span>
-        <span>{{ hotCitiesOpen ? '收起热榜' : '城市热榜' }}</span>
-      </button>
-
-      <transition name="slide-down">
-        <HotCitiesPanel
-          v-if="hotCitiesOpen"
-          class="hot-cities-overlay animate-fade-in-up"
-          :closable="true"
-          @close="hotCitiesOpen = false"
-        />
-      </transition>
-    </div>
 
     <div ref="mapContainer" :class="['map-container', { ready: isMapReady }]" id="map-container"></div>
 
@@ -230,7 +209,7 @@
             </div>
           </div>
           <p v-if="selectedCheckin.city || selectedCheckin.address" class="preview-address">
-            📌 {{ selectedCheckin.city || selectedCheckin.address }}
+            📌 {{ normalizeCityName(selectedCheckin.city) || normalizeAddressName(selectedCheckin.address) }}
           </p>
           <p v-if="selectedCheckin.preview_text" class="preview-text">
             {{ selectedCheckin.preview_text }}
@@ -265,6 +244,7 @@ import { ElMessage } from 'element-plus'
 import { getMapCheckins, searchCheckinPlaces } from '../api/checkins'
 import { formatCheckinDate, getImageUrl } from '../lib/checkins'
 import { convertGpsToAmap, loadAmap } from '../lib/amap'
+import { normalizeAddressName, normalizeCityName } from '../lib/region'
 import { useUserStore } from '../stores/user'
 import HotCitiesPanel from '../components/HotCitiesPanel.vue'
 
@@ -413,11 +393,11 @@ function normalizeSearchResult(poi, index) {
   const coordinate = getPoiCoordinate(poi.location)
   if (!coordinate) return null
 
-  const city = String(poi.cityname || poi.pname || poi.adname || '').trim()
+  const city = normalizeCityName(String(poi.cityname || poi.pname || poi.adname || '').trim())
   const addressParts = [poi.pname, poi.cityname, poi.adname, poi.address]
     .map((item) => String(item || '').trim())
     .filter(Boolean)
-  const address = [...new Set(addressParts)].join(' ')
+  const address = normalizeAddressName([...new Set(addressParts)].join(' '))
 
   return {
     id: poi.id || `${poi.name || 'poi'}-${index}-${coordinate.longitude}-${coordinate.latitude}`,
@@ -619,8 +599,8 @@ async function pushToCheckinForm(latitude, longitude, source, details = {}) {
       lat: latitude.toFixed(6),
       lng: longitude.toFixed(6),
       source,
-      city: details.city || '',
-      address: details.address || '',
+      city: normalizeCityName(details.city || ''),
+      address: normalizeAddressName(details.address || ''),
       location_name: details.location_name || '',
     },
   })
@@ -1353,58 +1333,6 @@ onBeforeUnmount(() => { destroyMap() })
   margin-top: 2px;
 }
 
-/* Hot cities overlay */
-.hot-cities-stack {
-  position: absolute;
-  left: 16px;
-  z-index: 1001;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.hot-cities-stack.is-guest {
-  top: 148px;
-}
-
-.hot-rank-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  padding: 10px 14px;
-  border: none;
-  color: var(--ink-900);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  font-family: inherit;
-  transition: transform var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out), background var(--fast) var(--ease-out);
-}
-
-.hot-rank-trigger:hover {
-  transform: translateY(-1px);
-}
-
-.hot-rank-trigger.active {
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-float);
-}
-
-.trigger-icon {
-  font-size: 14px;
-}
-
-.hot-cities-overlay {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 1000;
-  width: min(280px, calc(100vw - 24px));
-  max-height: 400px;
-  overflow-y: auto;
-}
-
 .toolbar-panel {
   display: flex;
   flex-direction: column;
@@ -1878,12 +1806,5 @@ onBeforeUnmount(() => { destroyMap() })
     bottom: 104px;
   }
 
-  .hot-cities-stack.is-guest {
-    top: 200px;
-  }
-
-  .hot-rank-trigger {
-    padding: 10px 12px;
-  }
 }
 </style>

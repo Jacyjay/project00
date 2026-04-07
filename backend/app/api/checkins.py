@@ -5,7 +5,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import List, Optional, Set, Dict, Tuple
-from datetime import date
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from app.models.user import User
 from app.models.social import Like, Comment
 from app.services.geocoding import reverse_geocode_coordinates, search_places_globally
 from app.services.image_upload import prepare_uploaded_image
+from app.services.region_normalizer import normalize_city_name, normalize_region_text
 from app.services.video_compress import compress_video
 from app.services.city_intro import ensure_city_intro
 from app.services.footprint_report import ensure_footprint_report
@@ -56,8 +57,8 @@ def _checkin_to_out(
         user_id=checkin.user_id,
         place_id=checkin.place_id,
         location_name=checkin.location_name,
-        city=checkin.city,
-        address=checkin.address,
+        city=normalize_city_name(checkin.city),
+        address=normalize_region_text(checkin.address),
         latitude=checkin.latitude,
         longitude=checkin.longitude,
         content=checkin.content,
@@ -84,8 +85,8 @@ def _checkin_to_map_item(checkin, likes_count: int = 0, comments_count: int = 0)
         user_nickname=checkin.user.nickname if checkin.user else "",
         user_avatar=checkin.user.avatar_url if checkin.user else None,
         location_name=checkin.location_name,
-        city=checkin.city,
-        address=checkin.address,
+        city=normalize_city_name(checkin.city),
+        address=normalize_region_text(checkin.address),
         latitude=checkin.latitude,
         longitude=checkin.longitude,
         preview_text=_preview_text(checkin.content),
@@ -218,8 +219,8 @@ async def search_checkin_places(
         PlaceSearchOut(
             id=item.id,
             name=item.name,
-            city=item.city,
-            address=item.address,
+            city=normalize_city_name(item.city),
+            address=normalize_region_text(item.address),
             latitude=item.latitude,
             longitude=item.longitude,
         )
@@ -239,7 +240,6 @@ async def publish_checkin(
     city: Optional[str] = Form(default=None),
     address: Optional[str] = Form(default=None),
     content: Optional[str] = Form(default=None),
-    visit_date: Optional[str] = Form(default=None),
     is_public: bool = Form(True),
     media_type: str = Form(default="photo"),
     photos: List[UploadFile] = File(default=[]),
@@ -275,23 +275,19 @@ async def publish_checkin(
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             prepared_photos.append((idx, normalized_bytes, extension))
 
-    # Parse visit date
-    parsed_date = None
-    if visit_date:
-        try:
-            parsed_date = date.fromisoformat(visit_date)
-        except ValueError:
-            parsed_date = None
+    # Keep visit_date aligned with publish time so the client no longer needs
+    # a separate manual date selector.
+    parsed_date = datetime.now(timezone.utc).date()
 
-    cleaned_city = city.strip() if city and city.strip() else None
-    cleaned_address = address.strip() if address and address.strip() else None
+    cleaned_city = normalize_city_name(city.strip()) if city and city.strip() else None
+    cleaned_address = normalize_region_text(address.strip()) if address and address.strip() else None
 
     if not cleaned_city or not cleaned_address:
         detected_location = await reverse_geocode_coordinates(latitude, longitude)
         if not cleaned_city and detected_location.city:
-            cleaned_city = detected_location.city
+            cleaned_city = normalize_city_name(detected_location.city)
         if not cleaned_address and detected_location.address:
-            cleaned_address = detected_location.address
+            cleaned_address = normalize_region_text(detected_location.address)
 
     # Create checkin
     checkin = await create_checkin(

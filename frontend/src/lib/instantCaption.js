@@ -1,3 +1,5 @@
+import { normalizeCityName } from './region'
+
 function normalizeText(value, fallback) {
   const text = String(value || '').trim()
   return text || fallback
@@ -21,7 +23,7 @@ function pickTwoTemplates(templates, seed) {
 }
 
 function buildContext({ city, locationName }) {
-  const cityLabel = normalizeText(city, '这座城市')
+  const cityLabel = normalizeText(normalizeCityName(city), '这座城市')
   const locationLabel = normalizeText(locationName, '这个角落')
   const cityPrefix = city ? `${cityLabel}的` : '这里的'
   const placeLabel = locationLabel.includes(cityLabel)

@@ -33,11 +33,11 @@
     <template v-else>
     <TransitionGroup name="city-list" tag="ul" class="city-list">
       <li
-        v-for="(item, index) in currentList"
-        :key="item.city"
+        v-for="(item, index) in normalizedCurrentList"
+        :key="item.displayCity || item.city"
         class="city-item"
         :style="{ '--idx': index }"
-        @click="goToCity(item.city)"
+        @click="goToCity(item.displayCity || item.city)"
       >
         <span :class="['rank', index < 3 ? `rank-${index+1}` : '']">
           <template v-if="index < 3">
@@ -45,7 +45,7 @@
           </template>
           <template v-else>{{ index + 1 }}</template>
         </span>
-        <span class="city-name">{{ item.city }}</span>
+        <span class="city-name">{{ item.displayCity || item.city }}</span>
         <div class="city-bar-wrap">
           <div class="city-bar" :style="{ width: barWidth(item.count) }"></div>
         </div>
@@ -60,6 +60,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getHotCities } from '../api/checkins.js'
+import { normalizeCityName } from '../lib/region'
 
 defineProps({
   closable: {
@@ -82,6 +83,13 @@ const tabs = [
 
 const currentList = computed(() =>
   activeTab.value === 'today' ? todayCities.value : historicalCities.value
+)
+
+const normalizedCurrentList = computed(() =>
+  currentList.value.map((item) => ({
+    ...item,
+    displayCity: normalizeCityName(item.city),
+  }))
 )
 
 const maxCount = computed(() => {
@@ -131,7 +139,7 @@ onMounted(async () => {
 })
 
 function goToCity(city) {
-  router.push({ name: 'CityDetail', params: { city } })
+  router.push({ name: 'CityDetail', params: { city: normalizeCityName(city) } })
 }
 </script>
 

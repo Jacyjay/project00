@@ -38,6 +38,15 @@
         </div>
 
         <el-form :model="form" label-position="top" class="checkin-form">
+          <el-form-item label="地点名称">
+            <el-input
+              v-model="form.location_name"
+              placeholder="填写地点名称，如西湖、外滩、天安门"
+              maxlength="80"
+              clearable
+            />
+          </el-form-item>
+
           <el-form-item label="城市">
             <div class="location-readonly">{{ form.city || '识别中...' }}</div>
           </el-form-item>
@@ -215,18 +224,6 @@
             </div>
           </div>
 
-          <el-form-item label="访问日期">
-            <el-date-picker
-              v-model="form.visit_date"
-              type="date"
-              placeholder="选择日期"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-              class="full-width"
-              id="date-picker"
-            />
-          </el-form-item>
-
           <el-form-item label="公开展示">
             <div class="public-control">
               <el-switch v-model="form.is_public" id="switch-public" />
@@ -241,7 +238,7 @@
               type="button"
               class="btn-primary submit-btn"
               @click="handleSubmit"
-              :disabled="submitting || processingPhotos || processingVideo || !form.location_name.trim()"
+              :disabled="submitting || processingPhotos || processingVideo || !effectiveLocationName"
               id="btn-submit"
             >
               {{ submitting ? (mediaType === 'video' ? '压缩上传中，请稍候...' : '发布中...') : '🚀 发布打卡' }}
@@ -262,6 +259,7 @@ import { publishCheckin, generateCaption, reverseGeocodeCheckin } from '../api/c
 import { normalizeImageUpload } from '../api/uploads'
 import { reverseGeocodeWithAmap } from '../lib/amap'
 import { createInstantCaptions } from '../lib/instantCaption'
+import { normalizeAddressName, normalizeCityName } from '../lib/region'
 import {
   canPreviewFileInBrowser,
   compressImageFile,
@@ -280,7 +278,6 @@ const form = ref({
   latitude: null,
   longitude: null,
   content: '',
-  visit_date: '',
   is_public: true,
 })
 
@@ -313,6 +310,9 @@ const hasCoordinates = computed(() =>
   Number.isFinite(form.value.latitude) && Number.isFinite(form.value.longitude)
 )
 const hasDraftContent = computed(() => form.value.content.trim().length > 0)
+const effectiveLocationName = computed(() =>
+  form.value.location_name.trim() || form.value.address.trim() || form.value.city.trim()
+)
 
 const sourceLabel = computed(() => {
   if (route.query.source === 'geolocation') return '当前位置定位'
@@ -364,14 +364,13 @@ function syncRouteLocation() {
   form.value.latitude = nextLatitude
   form.value.longitude = nextLongitude
 
-  const routeCity = typeof route.query.city === 'string' ? route.query.city.trim() : ''
-  const routeAddress = typeof route.query.address === 'string' ? route.query.address.trim() : ''
+  const routeCity = typeof route.query.city === 'string' ? normalizeCityName(route.query.city.trim()) : ''
+  const routeAddress = typeof route.query.address === 'string' ? normalizeAddressName(route.query.address.trim()) : ''
   const routeLocationName = typeof route.query.location_name === 'string' ? route.query.location_name.trim() : ''
+  const fallbackLocationName = routeLocationName || routeAddress || routeCity
 
   if (coordinatesChanged) {
-    if (routeLocationName) {
-      form.value.location_name = routeLocationName
-    }
+    form.value.location_name = fallbackLocationName
     form.value.city = routeCity
     form.value.address = routeAddress
     locationResolveError.value = ''
@@ -379,8 +378,8 @@ function syncRouteLocation() {
     return
   }
 
-  if (routeLocationName && !form.value.location_name.trim()) {
-    form.value.location_name = routeLocationName
+  if (fallbackLocationName && !form.value.location_name.trim()) {
+    form.value.location_name = fallbackLocationName
   }
 
   if (routeCity && !form.value.city) {
@@ -418,6 +417,7 @@ async function resolveLocationDetails(force = false) {
 
     const detectedCity = typeof res?.city === 'string' ? res.city.trim() : ''
     const detectedAddress = typeof res?.address === 'string' ? res.address.trim() : ''
+    const detectedLocationName = detectedAddress || detectedCity
 
     if (detectedCity && (!form.value.city.trim() || form.value.city.trim() === initialCity || force)) {
       form.value.city = detectedCity
@@ -425,6 +425,10 @@ async function resolveLocationDetails(force = false) {
 
     if (detectedAddress && (!form.value.address.trim() || form.value.address.trim() === initialAddress || force)) {
       form.value.address = detectedAddress
+    }
+
+    if (detectedLocationName && (!form.value.location_name.trim() || force)) {
+      form.value.location_name = detectedLocationName
     }
 
     lastResolvedLocationKey.value = coordinateKey
@@ -438,6 +442,7 @@ async function resolveLocationDetails(force = false) {
       if (requestId !== locationResolveRequestId) return
       const detectedCity = typeof fallback?.data?.city === 'string' ? fallback.data.city.trim() : ''
       const detectedAddress = typeof fallback?.data?.address === 'string' ? fallback.data.address.trim() : ''
+      const detectedLocationName = detectedAddress || detectedCity
 
       if (detectedCity && (!form.value.city.trim() || form.value.city.trim() === initialCity || force)) {
         form.value.city = detectedCity
@@ -445,6 +450,10 @@ async function resolveLocationDetails(force = false) {
 
       if (detectedAddress && (!form.value.address.trim() || form.value.address.trim() === initialAddress || force)) {
         form.value.address = detectedAddress
+      }
+
+      if (detectedLocationName && (!form.value.location_name.trim() || force)) {
+        form.value.location_name = detectedLocationName
       }
 
       lastResolvedLocationKey.value = coordinateKey
@@ -470,7 +479,7 @@ async function handleSubmit() {
     return
   }
 
-  if (!form.value.location_name.trim()) {
+  if (!effectiveLocationName.value) {
     ElMessage.warning('请填写地点名称')
     return
   }
@@ -483,14 +492,13 @@ async function handleSubmit() {
   submitting.value = true
   try {
     const formData = new FormData()
-    formData.append('location_name', form.value.location_name.trim())
+    formData.append('location_name', effectiveLocationName.value)
     formData.append('latitude', String(form.value.latitude))
     formData.append('longitude', String(form.value.longitude))
 
     if (form.value.city.trim()) formData.append('city', form.value.city.trim())
     if (form.value.address.trim()) formData.append('address', form.value.address.trim())
     if (form.value.content) formData.append('content', form.value.content)
-    if (form.value.visit_date) formData.append('visit_date', form.value.visit_date)
     formData.append('is_public', form.value.is_public ? 'true' : 'false')
     formData.append('media_type', mediaType.value)
 
@@ -546,7 +554,7 @@ async function collectAiImageBase64s() {
 }
 
 async function requestAiCaption(mode = 'generate') {
-  if (!form.value.location_name.trim()) {
+  if (!effectiveLocationName.value) {
     ElMessage.warning('先填写地点名称，再生成文案')
     return
   }
@@ -561,7 +569,7 @@ async function requestAiCaption(mode = 'generate') {
   const instantCaptions = mode === 'generate'
     ? createInstantCaptions({
       city: form.value.city,
-      locationName: form.value.location_name,
+      locationName: effectiveLocationName.value,
       style: aiStyle.value,
       captionType: aiType.value,
     })
@@ -581,7 +589,7 @@ async function requestAiCaption(mode = 'generate') {
 
     const res = await generateCaption({
       city: form.value.city || '',
-      location_name: form.value.location_name || '',
+      location_name: effectiveLocationName.value || '',
       image_base64s: imageBase64s,
       style: aiStyle.value,
       caption_type: aiType.value,

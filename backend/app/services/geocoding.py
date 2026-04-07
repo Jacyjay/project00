@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from app.core.config import settings
+from app.services.region_normalizer import normalize_city_name, normalize_region_text
 
 logger = logging.getLogger(__name__)
 INVALID_CITY_NAMES = {"市辖区", "县", "城区"}
@@ -126,8 +127,8 @@ def _resolve_nominatim_city(address_data: Optional[Dict], display_name: Optional
 def _build_nominatim_result(payload: dict) -> ReverseGeocodeResult:
     address_data = payload.get("address") or {}
     display_name = _normalize_text(payload.get("display_name"))
-    city = _resolve_nominatim_city(address_data, display_name)
-    address = display_name
+    city = normalize_city_name(_resolve_nominatim_city(address_data, display_name))
+    address = normalize_region_text(display_name)
     return ReverseGeocodeResult(city=city, address=address)
 
 
@@ -143,7 +144,7 @@ def _build_nominatim_place_search_result(payload: Dict, index: int) -> Optional[
         return None
 
     address_data = payload.get("address") or {}
-    city = _resolve_nominatim_city(address_data, display_name)
+    city = normalize_city_name(_resolve_nominatim_city(address_data, display_name))
     name = (
         _normalize_region_text(payload.get("name"))
         or _normalize_region_text((display_name.split(",", 1)[0] if display_name else None))
@@ -155,7 +156,7 @@ def _build_nominatim_place_search_result(payload: Dict, index: int) -> Optional[
         id=item_id,
         name=name,
         city=city,
-        address=display_name,
+        address=normalize_region_text(display_name),
         latitude=latitude,
         longitude=longitude,
     )
@@ -271,8 +272,8 @@ async def reverse_geocode_coordinates(latitude: float, longitude: float) -> Reve
         or _normalize_text(address_component.get("township"))
         or _normalize_text(address_component.get("country"))
     )
-    address = _normalize_text(regeocode.get("formatted_address"))
-    result = ReverseGeocodeResult(city=city, address=address)
+    address = normalize_region_text(_normalize_text(regeocode.get("formatted_address")))
+    result = ReverseGeocodeResult(city=normalize_city_name(city), address=address)
     if result.city or result.address:
         return result
     return await _reverse_geocode_nominatim(latitude, longitude)

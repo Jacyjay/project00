@@ -23,6 +23,8 @@ class UserPublicOut(BaseModel):
     # Conditionally populated: present when show_email=True or viewer is the owner
     email: Optional[str] = None
     show_email: bool = True
+    show_followers: bool = True
+    show_following: bool = True
 
     class Config:
         from_attributes = True

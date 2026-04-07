@@ -7,6 +7,7 @@ from typing import Dict, Optional, Set
 import httpx
 
 from app.core.config import settings
+from app.services.region_normalizer import normalize_city_name
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ def ensure_city_intro(city: str) -> None:
     """Fire-and-forget: schedule generation if not cached or already in progress.
     Must be called from within an async context (FastAPI route handler or lifespan).
     """
+    city = normalize_city_name(city)
     if not city or city in _CITY_INTRO_CACHE or city in _GENERATING:
         return
     if not settings.DOUBAO_API_KEY or not settings.DOUBAO_ENDPOINT_ID:
@@ -75,4 +77,4 @@ def ensure_city_intro(city: str) -> None:
 
 def get_city_intro(city: str) -> Optional[str]:
     """Return the cached intro text, or None if not yet generated."""
-    return _CITY_INTRO_CACHE.get(city)
+    return _CITY_INTRO_CACHE.get(normalize_city_name(city))

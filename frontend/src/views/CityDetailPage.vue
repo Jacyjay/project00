@@ -57,9 +57,10 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import CheckinCard from '../components/CheckinCard.vue'
 import { getCityCheckins, getCityIntro } from '../api/checkins.js'
+import { normalizeCityName } from '../lib/region'
 
 const route = useRoute()
-const city = computed(() => route.params.city)
+const city = computed(() => normalizeCityName(String(route.params.city || '')))
 
 const scrollContainer = ref(null)
 const checkins = ref([])

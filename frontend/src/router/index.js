@@ -70,6 +70,12 @@ const routes = [
     component: () => import('../views/MyFootprintPage.vue'),
     meta: { immersiveDock: true },
   },
+  {
+    path: '/feed',
+    name: 'Feed',
+    component: () => import('../views/FeedPage.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

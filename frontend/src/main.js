@@ -2,7 +2,6 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import {
   ElConfigProvider,
-  ElDatePicker,
   ElDialog,
   ElForm,
   ElFormItem,
@@ -11,7 +10,6 @@ import {
   ElUpload,
 } from 'element-plus'
 import 'element-plus/es/components/config-provider/style/css'
-import 'element-plus/es/components/date-picker/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
@@ -29,7 +27,7 @@ import router from './router'
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)
-;[ElConfigProvider, ElDatePicker, ElDialog, ElForm, ElFormItem, ElInput, ElSwitch, ElUpload].forEach((component) => {
+;[ElConfigProvider, ElDialog, ElForm, ElFormItem, ElInput, ElSwitch, ElUpload].forEach((component) => {
   app.component(component.name, component)
 })
 

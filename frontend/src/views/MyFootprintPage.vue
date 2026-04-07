@@ -114,8 +114,8 @@
               <img :src="imageUrl(selectedCheckin.preview_image_url || selectedCheckin.photos?.[0]?.image_url)" class="preview-photo" />
             </div>
             <div class="preview-content">
-              <div class="preview-name">{{ selectedCheckin.location_name || selectedCheckin.city || '未知地点' }}</div>
-              <div class="preview-meta">{{ selectedCheckin.city }} · {{ formatDate(selectedCheckin.created_at) }}</div>
+              <div class="preview-name">{{ selectedCheckin.location_name || normalizeCityName(selectedCheckin.city) || '未知地点' }}</div>
+              <div class="preview-meta">{{ normalizeCityName(selectedCheckin.city) }} · {{ formatDate(selectedCheckin.created_at) }}</div>
               <p v-if="selectedCheckin.content" class="preview-text">{{ selectedCheckin.content }}</p>
               <router-link :to="`/checkins/${selectedCheckin.id}`" class="btn-primary btn-sm preview-btn">
                 查看详情
@@ -145,6 +145,7 @@ import { useUserStore } from '../stores/user'
 import { getUserCheckins, getFootprintReport, refreshFootprintReport } from '../api/checkins'
 import { loadAmap } from '../lib/amap'
 import { getImageUrl } from '../lib/checkins'
+import { normalizeCityName } from '../lib/region'
 
 const userStore = useUserStore()
 const mapContainer = ref(null)
@@ -201,7 +202,7 @@ let AMap = null
 let markers = []
 
 const cityCount = computed(() =>
-  new Set(checkins.value.map(c => c.city).filter(Boolean)).size
+  new Set(checkins.value.map(c => normalizeCityName(c.city)).filter(Boolean)).size
 )
 
 // Detail panel (city or country breakdown)
@@ -218,7 +219,7 @@ function buildCountMap(items) {
 }
 
 function openCityPanel() {
-  const items = buildCountMap(checkins.value.map(c => c.city).filter(Boolean))
+  const items = buildCountMap(checkins.value.map(c => normalizeCityName(c.city)).filter(Boolean))
   const maxCount = items[0]?.count || 1
   detailPanel.value = { type: 'city', title: '到访城市', items, maxCount }
 }
