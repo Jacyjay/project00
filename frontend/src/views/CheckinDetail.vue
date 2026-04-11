@@ -12,8 +12,39 @@
       </div>
 
       <template v-else-if="checkin">
-        <!-- Hero header -->
-        <div class="checkin-header glass-card animate-fade-in-up" style="animation-delay: 0s; animation-fill-mode: both;">
+        <!-- User header (prominent) -->
+        <div class="user-header glass-card animate-fade-in-up" style="animation-delay: 0s; animation-fill-mode: both;">
+          <router-link :to="`/profile/${checkin.user_id}`" class="user-profile-link">
+            <div class="user-avatar-large">
+              <img v-if="checkin.user_avatar" :src="getImageUrl(checkin.user_avatar)" class="avatar-img" />
+              <span v-else class="avatar-letter">{{ checkin.user_nickname?.charAt(0) }}</span>
+            </div>
+          </router-link>
+          <div class="user-info-section">
+            <router-link :to="`/profile/${checkin.user_id}`" class="user-name-link">
+              <h2 class="user-display-name">{{ checkin.user_nickname }}</h2>
+            </router-link>
+            <div class="user-stats">
+              <span class="stat-item">{{ followStats.followers_count }} 粉丝</span>
+              <span class="stat-sep">·</span>
+              <span class="stat-item">{{ followStats.following_count }} 关注</span>
+            </div>
+          </div>
+          <button
+            v-if="!isOwner && userStore.isLoggedIn"
+            :class="['follow-btn', { following: isFollowing, mutual: isMutual }]"
+            @click="toggleFollow"
+            :disabled="followLoading"
+          >
+            <span v-if="followLoading">...</span>
+            <span v-else-if="isMutual">✓ 互相关注</span>
+            <span v-else-if="isFollowing">✓ 已关注</span>
+            <span v-else>+ 关注</span>
+          </button>
+        </div>
+
+        <!-- Location header -->
+        <div class="checkin-header glass-card animate-fade-in-up" style="animation-delay: 0.08s; animation-fill-mode: both;">
           <div class="header-main">
             <div class="title-row">
               <h1 class="checkin-name">{{ checkin.location_name }}</h1>
@@ -26,11 +57,6 @@
               📍 {{ displayCity || displayAddress }}
             </p>
             <div class="checkin-meta">
-              <router-link :to="`/profile/${checkin.user_id}`" class="meta-user">
-                <div class="meta-avatar">{{ checkin.user_nickname?.charAt(0) }}</div>
-                <span>{{ checkin.user_nickname }}</span>
-              </router-link>
-              <span class="meta-sep">·</span>
               <span>{{ formatCheckinDate(checkin) }}</span>
               <span v-if="checkin.content" class="meta-sep">·</span>
               <span v-if="checkin.content">{{ checkin.content.length }} 字</span>
@@ -43,7 +69,7 @@
         </div>
 
         <!-- City intro (always expanded, directly below header) -->
-        <div v-if="displayCity" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.08s; animation-fill-mode: both;">
+        <div v-if="displayCity" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.16s; animation-fill-mode: both;">
           <h2 class="section-title">
             <span class="section-icon">🏙️</span>
             {{ displayCity }} 城市印象
@@ -58,7 +84,7 @@
         </div>
 
         <!-- Content -->
-        <div v-if="checkin.content" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.16s; animation-fill-mode: both;">
+        <div v-if="checkin.content" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.24s; animation-fill-mode: both;">
           <h2 class="section-title">
             <span class="section-icon">📝</span>
             打卡文案
@@ -67,7 +93,7 @@
         </div>
 
         <!-- Video (video checkins) -->
-        <div v-if="checkin.media_type === 'video'" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.24s; animation-fill-mode: both;">
+        <div v-if="checkin.media_type === 'video'" class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.32s; animation-fill-mode: both;">
           <h2 class="section-title">
             <span class="section-icon">🎬</span>
             视频
@@ -87,7 +113,7 @@
         </div>
 
         <!-- Photos (photo checkins) -->
-        <div v-else class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.24s; animation-fill-mode: both;">
+        <div v-else class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.32s; animation-fill-mode: both;">
           <h2 class="section-title">
             <span class="section-icon">📸</span>
             照片
@@ -115,7 +141,7 @@
         </div>
 
         <!-- Owner actions -->
-        <div v-if="isOwner" class="section-card glass-card owner-actions animate-fade-in-up" style="animation-delay: 0.28s; animation-fill-mode: both;">
+        <div v-if="isOwner" class="section-card glass-card owner-actions animate-fade-in-up" style="animation-delay: 0.36s; animation-fill-mode: both;">
           <button class="action-btn" @click="openEdit">✏️ 编辑文案</button>
           <button class="action-btn" @click="toggleVisibility">
             {{ checkin.is_public ? '🔒 改为私密' : '🌐 改为公开' }}
@@ -124,7 +150,7 @@
         </div>
 
         <!-- Social interactions -->
-        <div class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.32s; animation-fill-mode: both;">
+        <div class="section-card glass-card animate-fade-in-up" style="animation-delay: 0.40s; animation-fill-mode: both;">
           <div class="social-bar">
             <button :class="['like-btn', { liked: isLiked }]" @click="toggleLike">
               <span class="like-heart">{{ isLiked ? '❤️' : '🤍' }}</span>
@@ -236,6 +262,7 @@ import { normalizeAddressName, normalizeCityName } from '../lib/region'
 import { useUserStore } from '../stores/user.js'
 import { useRouter } from 'vue-router'
 import ShareCard from '../components/ShareCard.vue'
+import { followUser, unfollowUser, getFollowStatus } from '../api/follows'
 
 const route = useRoute()
 const router = useRouter()
@@ -264,6 +291,12 @@ const submittingComment = ref(false)
 const editVisible = ref(false)
 const editContent = ref('')
 const savingEdit = ref(false)
+
+// Follow state
+const isFollowing = ref(false)
+const isMutual = ref(false)
+const followStats = ref({ followers_count: 0, following_count: 0 })
+const followLoading = ref(false)
 
 function openEdit() {
   editContent.value = checkin.value?.content || ''
@@ -389,6 +422,47 @@ async function submitComment() {
   }
 }
 
+async function loadFollowStatus() {
+  if (!checkin.value || !userStore.isLoggedIn || isOwner.value) return
+  try {
+    const res = await getFollowStatus(checkin.value.user_id)
+    isFollowing.value = res.data.is_following
+    isMutual.value = res.data.is_mutual
+    followStats.value = {
+      followers_count: res.data.followers_count,
+      following_count: res.data.following_count,
+    }
+  } catch (e) {
+    console.error('Failed to load follow status:', e)
+  }
+}
+
+async function toggleFollow() {
+  if (!userStore.isLoggedIn) {
+    ElMessage.info('请先登录')
+    return
+  }
+  followLoading.value = true
+  try {
+    if (isFollowing.value) {
+      await unfollowUser(checkin.value.user_id)
+      isFollowing.value = false
+      isMutual.value = false
+      followStats.value.followers_count = Math.max(0, followStats.value.followers_count - 1)
+      ElMessage.success('已取消关注')
+    } else {
+      await followUser(checkin.value.user_id)
+      isFollowing.value = true
+      followStats.value.followers_count += 1
+      ElMessage.success('关注成功')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '操作失败')
+  } finally {
+    followLoading.value = false
+  }
+}
+
 async function loadData() {
   loading.value = true
   const checkinId = props.id || route.params.id
@@ -401,6 +475,7 @@ async function loadData() {
     commentsCount.value = checkin.value.comments_count || 0
 
     await loadSocialData(checkin.value.id)
+    await loadFollowStatus()
 
     // Auto-load city intro
     if (displayCity.value) {
@@ -423,6 +498,144 @@ onMounted(loadData)
 </script>
 
 <style scoped>
+/* ── User header (prominent) ── */
+.user-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.user-profile-link {
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.user-avatar-large {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--brand-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: transform var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out);
+  box-shadow: 0 2px 12px rgba(232, 93, 4, 0.15);
+}
+
+.user-avatar-large:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 20px rgba(232, 93, 4, 0.25);
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-letter {
+  color: #1C1007;
+  font-size: 24px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.user-info-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-name-link {
+  text-decoration: none;
+  transition: opacity var(--fast) var(--ease-out);
+}
+
+.user-name-link:hover {
+  opacity: 0.8;
+}
+
+.user-display-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink-900);
+  margin: 0 0 6px 0;
+  line-height: 1.2;
+}
+
+.user-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-400);
+}
+
+.stat-item {
+  font-weight: 500;
+}
+
+.stat-sep {
+  opacity: 0.5;
+}
+
+.follow-btn {
+  padding: 10px 24px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--brand);
+  background: var(--brand-gradient);
+  color: #1C1007;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--fast) var(--ease-out);
+  box-shadow: 0 2px 8px rgba(232, 93, 4, 0.25);
+  flex-shrink: 0;
+}
+
+.follow-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(232, 93, 4, 0.35);
+}
+
+.follow-btn:active {
+  transform: translateY(0);
+}
+
+.follow-btn.following {
+  background: var(--bg-surface);
+  color: var(--ink-500);
+  border-color: var(--ink-200);
+  box-shadow: none;
+}
+
+.follow-btn.following:hover {
+  background: var(--bg-muted);
+  color: var(--error);
+  border-color: rgba(217, 79, 61, 0.3);
+  box-shadow: none;
+}
+
+.follow-btn.mutual {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  color: #1C1007;
+}
+
+.follow-btn.mutual:hover {
+  background: linear-gradient(135deg, #5568d3 0%, #63408a 100%);
+}
+
+.follow-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
 /* ── City intro ── */
 .city-intro-toggle {
   display: flex;

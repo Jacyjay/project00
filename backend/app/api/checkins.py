@@ -358,6 +358,11 @@ async def publish_checkin(
     if cleaned_city:
         ensure_city_intro(cleaned_city)
     ensure_footprint_report(current_user.id)
+
+    # 触发成就检测
+    from app.services.achievements import ensure_achievements_check
+    ensure_achievements_check(current_user.id, "checkin")
+
     return _checkin_to_out(checkin)
 
 

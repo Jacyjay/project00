@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine, async_session_maker
-from app.models import User, Place, Checkin, Photo, Message, FootprintReport, Follow  # noqa: import all models
+from app.models import User, Place, Checkin, Photo, Message, FootprintReport, Follow, Achievement, UserAchievement, Journey, JourneyCheckin  # noqa: import all models
 from app.models.social import Like, Comment  # noqa: import social models for table creation
 from app.api.auth import router as auth_router
 from app.api.places import router as places_router
@@ -19,8 +19,12 @@ from app.api.users import router as users_router
 from app.api.messages import router as messages_router
 from app.api.uploads import router as uploads_router
 from app.api import social, ai_caption
+from app.api.ai_travel import router as ai_travel_router
 from app.api.footprint_report import router as footprint_report_router
 from app.api.follows import router as follows_router
+from app.api.achievements import router as achievements_router
+from app.api.journeys import router as journeys_router
+from app.api.proxy import router as proxy_router
 from app.services.city_intro import ensure_city_intro
 
 logger = logging.getLogger(__name__)
@@ -28,23 +32,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Pre-generate city intros for all cities that already exist in the database.
-    # This ensures existing check-ins have intros available without waiting for
-    # a new publish to trigger generation.
+    # Disable startup warmup for city intros in production. The warmup can
+    # trigger a burst of Doubao requests and starve interactive AI features
+    # such as travel suggestions. City intros are still generated lazily when
+    # the related page is actually opened.
+
+    # Initialize achievements
     try:
-        async with async_session_maker() as db:
-            result = await db.execute(
-                select(Checkin.city)
-                .where(Checkin.city.isnot(None), Checkin.city != "")
-                .distinct()
-            )
-            cities = [row[0] for row in result.all()]
-        for city in cities:
-            ensure_city_intro(city)
-        if cities:
-            logger.info("City intro warmup triggered for %d cities", len(cities))
+        from app.services.achievements import init_achievements, backfill_achievements_for_all_users
+        await init_achievements()
+        await backfill_achievements_for_all_users()
+        logger.info("Achievements initialized and backfilled")
     except Exception as exc:
-        logger.warning("City intro warmup failed: %s", exc)
+        logger.warning("Achievements initialization failed: %s", exc)
+
     yield
 
 
@@ -78,8 +79,12 @@ app.include_router(messages_router)
 app.include_router(uploads_router)
 app.include_router(social.router, prefix="/api", tags=["social"])
 app.include_router(ai_caption.router, prefix="/api", tags=["ai"])
+app.include_router(ai_travel_router)
 app.include_router(footprint_report_router)
 app.include_router(follows_router)
+app.include_router(achievements_router)
+app.include_router(journeys_router)
+app.include_router(proxy_router)
 
 
 @app.get("/")

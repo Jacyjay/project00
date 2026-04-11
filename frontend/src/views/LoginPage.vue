@@ -73,6 +73,10 @@
       </div>
 
       <p class="auth-switch">
+        <router-link to="/forgot-password" class="auth-link">忘记密码？</router-link>
+      </p>
+
+      <p class="auth-switch">
         还没有账号？
         <router-link to="/register" class="auth-link">立即注册</router-link>
       </p>

@@ -9,6 +9,7 @@ from app.models.follow import Follow
 from app.models.user import User
 from app.models.checkin import Checkin
 from app.models.social import Like, Comment
+from app.services.achievements import ensure_achievements_check
 
 router = APIRouter(prefix="/api", tags=["follows"])
 
@@ -33,6 +34,11 @@ async def follow_user(
         return {"status": "already_following"}
     db.add(Follow(follower_id=current_user.id, following_id=user_id))
     await db.commit()
+
+    # 关注行为触发双方成就检测（如社交达人）
+    ensure_achievements_check(current_user.id, "follow")
+    ensure_achievements_check(user_id, "follow")
+
     return {"status": "following"}
 
 

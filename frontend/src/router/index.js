@@ -55,6 +55,12 @@ const routes = [
     meta: { hideChrome: true },
   },
   {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: () => import('../views/ForgotPasswordPage.vue'),
+    meta: { hideChrome: true },
+  },
+  {
     path: '/cities/:city',
     name: 'CityDetail',
     component: () => import('../views/CityDetailPage.vue'),
@@ -75,6 +81,13 @@ const routes = [
     name: 'Feed',
     component: () => import('../views/FeedPage.vue'),
     meta: { requiresAuth: true },
+  },
+  {
+    path: '/journeys/:id',
+    name: 'JourneyDetail',
+    component: () => import('../views/JourneyDetailPage.vue'),
+    props: true,
+    meta: { hideChrome: true },
   },
 ]
 

@@ -132,7 +132,7 @@ body {
   background: var(--bg-base);
   color: var(--text-primary);
   line-height: 1.6;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -626,7 +626,7 @@ a:hover {
   gap: 16px;
   padding: 60px 24px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .loading-spinner {
@@ -646,7 +646,7 @@ a:hover {
   gap: 12px;
   padding: 48px 24px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   text-align: center;
 }
 
@@ -670,6 +670,6 @@ a:hover {
 @media (max-width: 768px) {
   .btn-primary, .btn-secondary {
     padding: 10px 20px;
-    font-size: 14px;
+    font-size: 15px;
   }
 }

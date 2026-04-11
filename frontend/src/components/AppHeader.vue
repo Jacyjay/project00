@@ -16,19 +16,50 @@
         </div>
 
         <div class="header-right">
-          <!-- User search -->
+          <!-- Map display mode toggle (only on map pages) -->
+          <button
+            v-if="showMapToggle"
+            type="button"
+            class="map-toggle-btn"
+            @click="mapStore.toggleMapDetailMode()"
+            :title="mapStore.mapDetailMode ? '切换到显示坐标' : '切换到显示详情'"
+          >
+            <span class="btn-icon">{{ mapStore.mapDetailMode ? '📌' : '🖼️' }}</span>
+            <span class="btn-label">{{ mapStore.mapDetailMode ? '显示坐标' : '显示详情' }}</span>
+          </button>
+
+          <!-- Unified search -->
           <div class="search-wrap" ref="searchWrapRef">
-            <button class="search-trigger" @click="openSearch" title="搜索用户">🔍</button>
+            <button class="search-trigger" @click="openSearch" title="搜索">🔍</button>
             <transition name="search-drop">
               <div v-if="searchOpen" class="search-dropdown glass-card">
                 <input
                   ref="searchInputRef"
                   v-model="searchQuery"
                   class="search-input"
-                  placeholder="搜索用户昵称或邮箱..."
-                  @input="onSearchInput"
+                  placeholder="输入关键词后可搜用户或搜地点..."
                   @keydown.escape="closeSearch"
+                  @keydown.enter.prevent="handleSearchUser"
                 />
+                <div class="search-actions">
+                  <button
+                    type="button"
+                    class="search-action-btn"
+                    :disabled="searchLoading || !searchQuery.trim()"
+                    @click="handleSearchUser"
+                  >
+                    {{ searchLoading && searchMode === 'user' ? '搜索中...' : '搜用户' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="search-action-btn search-action-btn-place"
+                    :disabled="!searchQuery.trim()"
+                    @click="handleSearchPlace"
+                  >
+                    搜地点
+                  </button>
+                </div>
+                <p v-if="searchMode === 'place' && placeSearchHint" class="search-hint">{{ placeSearchHint }}</p>
                 <div v-if="searchResults.length" class="search-results">
                   <router-link
                     v-for="u in searchResults"
@@ -41,7 +72,12 @@
                     <span class="search-name">{{ u.nickname }}</span>
                   </router-link>
                 </div>
-                <p v-else-if="searchQuery.length > 0 && !searchLoading" class="search-empty">未找到用户</p>
+                <p
+                  v-else-if="searchMode === 'user' && hasSearched && searchQuery.length > 0 && !searchLoading"
+                  class="search-empty"
+                >
+                  未找到用户
+                </p>
               </div>
             </transition>
           </div>
@@ -109,6 +145,7 @@
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
+import { useMapStore } from '../stores/map'
 import { searchUsers } from '../api/checkins'
 import { getUnreadCount } from '../api/messages'
 import LogoIcon from './LogoIcon.vue'
@@ -116,17 +153,25 @@ import LogoIcon from './LogoIcon.vue'
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const mapStore = useMapStore()
 const unreadCount = ref(0)
 let pollTimer = null
 
-// ─── User search ──────────────────────────────────────────────────────────────
+// 判断是否显示地图显示模式切换按钮
+const showMapToggle = computed(() => {
+  return route.name === 'home' || route.name === 'MyFootprint'
+})
+
+// ─── Unified search ───────────────────────────────────────────────────────────
 const searchOpen = ref(false)
 const searchQuery = ref('')
 const searchResults = ref([])
 const searchLoading = ref(false)
+const searchMode = ref('user')
+const hasSearched = ref(false)
+const placeSearchHint = ref('')
 const searchInputRef = ref(null)
 const searchWrapRef = ref(null)
-let searchTimer = null
 
 function openSearch() {
   searchOpen.value = true
@@ -137,19 +182,47 @@ function closeSearch() {
   searchOpen.value = false
   searchQuery.value = ''
   searchResults.value = []
+  searchMode.value = 'user'
+  hasSearched.value = false
+  placeSearchHint.value = ''
+  searchLoading.value = false
 }
 
-function onSearchInput() {
-  clearTimeout(searchTimer)
-  if (!searchQuery.value.trim()) { searchResults.value = []; return }
-  searchTimer = setTimeout(async () => {
-    searchLoading.value = true
-    try {
-      const res = await searchUsers(searchQuery.value.trim())
-      searchResults.value = res.data || []
-    } catch { searchResults.value = [] }
-    finally { searchLoading.value = false }
-  }, 300)
+async function handleSearchUser() {
+  const query = searchQuery.value.trim()
+  if (!query) return
+  searchMode.value = 'user'
+  hasSearched.value = true
+  placeSearchHint.value = ''
+  searchLoading.value = true
+  try {
+    const res = await searchUsers(query)
+    searchResults.value = res.data || []
+  } catch {
+    searchResults.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+async function handleSearchPlace() {
+  const query = searchQuery.value.trim()
+  if (!query) return
+
+  searchMode.value = 'place'
+  hasSearched.value = false
+  searchResults.value = []
+  placeSearchHint.value = route.name === 'home'
+    ? `正在地图广场搜索“${query}”`
+    : `正在跳转地图广场搜索“${query}”`
+
+  mapStore.requestPlaceSearch(query)
+
+  if (route.name !== 'home') {
+    await router.push({ name: 'home' })
+  }
+
+  closeSearch()
 }
 
 function handleClickOutside(e) {
@@ -487,7 +560,6 @@ onUnmounted(() => {
   position: relative;
   z-index: 1100;
   background: #ffffff;
-  border-bottom: 1px solid rgba(120, 82, 52, 0.06);
   box-shadow: none;
 }
 
@@ -543,6 +615,49 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+/* Map toggle button */
+.map-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--ink-100);
+  background: var(--bg-muted);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all var(--fast);
+  white-space: nowrap;
+}
+
+.map-toggle-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--ink-200);
+}
+
+.map-toggle-btn:active {
+  transform: scale(0.96);
+}
+
+.map-toggle-btn .btn-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.map-toggle-btn .btn-label {
+  font-size: 13px;
+  color: var(--ink-600);
+}
+
+@media (max-width: 768px) {
+  .map-toggle-btn .btn-label {
+    display: none;
+  }
+  .map-toggle-btn {
+    padding: 6px 10px;
+  }
+}
+
 /* ─── Search ── */
 .search-wrap {
   position: relative;
@@ -575,6 +690,44 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.search-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.search-action-btn {
+  flex: 1;
+  height: 34px;
+  border: 1px solid var(--ink-100);
+  background: var(--bg-muted);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink-700);
+  transition: all var(--fast);
+}
+
+.search-action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--ink-200);
+}
+
+.search-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.search-action-btn-place {
+  color: var(--brand-strong);
+}
+
+.search-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-400);
+  line-height: 1.5;
 }
 
 .search-input {

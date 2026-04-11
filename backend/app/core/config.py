@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     # Amap (高德地图)
     AMAP_KEY: str = ""
+    AMAP_WEB_KEY: str = ""
     MAIL_DEBUG_FALLBACK: bool = False
 
     model_config = SettingsConfigDict(env_file=str(BASE_DIR / ".env"), extra="ignore")
@@ -88,6 +89,10 @@ class Settings(BaseSettings):
     @property
     def mail_enabled(self) -> bool:
         return bool(self.MAIL_USERNAME and self.MAIL_PASSWORD)
+
+    @property
+    def amap_web_key(self) -> str:
+        return (self.AMAP_WEB_KEY or self.AMAP_KEY).strip()
 
 
 settings = Settings()

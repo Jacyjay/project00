@@ -124,6 +124,28 @@
           <div ref="footprintMapRef" class="footprint-map"></div>
         </div>
 
+        <!-- Achievements Section -->
+        <div class="section-card glass-card">
+          <div class="section-header">
+            <h2 class="section-title">🏆 成就徽章</h2>
+            <span class="achievement-count">{{ achievementStats.unlocked }}/{{ achievementStats.total }}</span>
+          </div>
+
+          <div v-if="achievements.length === 0" class="empty-state">
+            <p>{{ isOwnProfile ? '还没有解锁任何成就，快去打卡吧！' : '该用户还没有解锁任何成就' }}</p>
+          </div>
+
+          <div v-else class="achievements-grid">
+            <AchievementBadge
+              v-for="achievement in achievements"
+              :key="achievement.code"
+              :achievement="achievement"
+              :unlocked="achievement.unlocked"
+              @click="showAchievementDetail(achievement)"
+            />
+          </div>
+        </div>
+
         <div class="section-card glass-card">
           <h2 class="section-title">📋 打卡时间线</h2>
           <div v-if="checkins.length === 0" class="empty-state">
@@ -247,7 +269,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUser, getUserStats, uploadAvatar, updateShowEmail } from '../api/users'
 import { addComment, deleteCheckin, getComments, getUserCheckins, likeCheckin, unlikeCheckin } from '../api/checkins'
 import { followUser, unfollowUser, getFollowStatus, updateFollowPrivacy } from '../api/follows'
+import { getUserAchievements, getAllAchievements } from '../api/achievements'
 import FollowListModal from '../components/FollowListModal.vue'
+import AchievementBadge from '../components/AchievementBadge.vue'
 import { formatCheckinDate, formatDate, getImageUrl } from '../lib/checkins'
 import { loadAmap } from '../lib/amap'
 import { useUserStore } from '../stores/user'
@@ -328,6 +352,10 @@ const user = ref(null)
 const stats = ref({ total_checkins: 0, total_places: 0, total_photos: 0 })
 const checkins = ref([])
 const loading = ref(true)
+
+// Achievements state
+const achievements = ref([])
+const achievementStats = ref({ total: 0, unlocked: 0 })
 
 // Follow state
 const isFollowing = ref(false)
@@ -613,6 +641,41 @@ async function loadData({ showLoading = true } = {}) {
   } catch {
     // silently ignore — follow status is non-critical
   }
+
+  // Load achievements
+  try {
+    if (isOwnProfile.value) {
+      // 自己的主页：显示所有成就及解锁状态
+      const allAchievementsRes = await getAllAchievements()
+      achievements.value = allAchievementsRes.data
+      achievementStats.value = {
+        total: allAchievementsRes.data.length,
+        unlocked: allAchievementsRes.data.filter(a => a.unlocked).length,
+      }
+    } else {
+      // 他人主页：只显示已解锁的成就
+      const achievementsRes = await getUserAchievements(userId)
+      achievements.value = achievementsRes.data
+      achievementStats.value = {
+        total: achievementsRes.data.length,
+        unlocked: achievementsRes.data.filter(a => a.unlocked).length,
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load achievements:', error)
+  }
+}
+
+function showAchievementDetail(achievement) {
+  if (!achievement.unlocked) return
+  ElMessageBox.alert(
+    achievement.description || '暂无描述',
+    `${achievement.icon} ${achievement.name}`,
+    {
+      confirmButtonText: '确定',
+      customClass: 'achievement-detail-box',
+    }
+  )
 }
 
 onMounted(loadData)
@@ -1002,6 +1065,30 @@ onBeforeUnmount(() => {
   margin-bottom: 18px;
   color: var(--ink-900);
   letter-spacing: -0.02em;
+}
+
+/* ── Achievements ── */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.achievement-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-400);
+  background: var(--bg-muted);
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+}
+
+.achievements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
 }
 
 .footprint-map {

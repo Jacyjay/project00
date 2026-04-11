@@ -10,8 +10,6 @@ export const getMapCheckins = (limit = 200) =>
   api.get('/api/checkins/map', { params: { limit } })
 export const reverseGeocodeCheckin = (latitude, longitude) =>
   api.get('/api/checkins/reverse-geocode', { params: { latitude, longitude } })
-export const searchCheckinPlaces = (q, limit = 8) =>
-  api.get('/api/checkins/search-places', { params: { q, limit }, timeout: 20000 })
 
 export const getCheckin = (id) => api.get(`/api/checkins/${id}`)
 export const deleteCheckin = (id) => api.delete(`/api/checkins/${id}`)

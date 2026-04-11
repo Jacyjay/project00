@@ -186,54 +186,14 @@ async def _reverse_geocode_nominatim(latitude: float, longitude: float) -> Rever
 
 
 async def search_places_globally(query: str, limit: int = 8) -> list[PlaceSearchResult]:
-    cleaned_query = _normalize_text(query)
-    if not cleaned_query:
-        return []
-
-    try:
-        async with httpx.AsyncClient(timeout=8.0, headers=NOMINATIM_HEADERS) as client:
-            response = await client.get(
-                NOMINATIM_SEARCH_URL,
-                params={
-                    "q": cleaned_query,
-                    "format": "jsonv2",
-                    "limit": limit,
-                    "accept-language": "zh-CN",
-                    "addressdetails": 1,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-    except Exception as exc:
-        logger.warning("Global place search failed: %s", exc)
-        return []
-
-    if not isinstance(payload, list):
-        return []
-
-    results: list[PlaceSearchResult] = []
-    seen: set[tuple[str, int, int]] = set()
-    for index, item in enumerate(payload):
-        normalized = _build_nominatim_place_search_result(item, index)
-        if not normalized:
-            continue
-        dedupe_key = (
-            normalized.name,
-            round(normalized.latitude * 10000),
-            round(normalized.longitude * 10000),
-        )
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        results.append(normalized)
-
-    return results[:limit]
+    return []
 
 
 async def reverse_geocode_coordinates(latitude: float, longitude: float) -> ReverseGeocodeResult:
     amap_key = settings.AMAP_KEY
     if not amap_key:
-        return await _reverse_geocode_nominatim(latitude, longitude)
+        logger.warning("Amap key not configured, reverse geocoding unavailable")
+        return ReverseGeocodeResult()
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -248,17 +208,17 @@ async def reverse_geocode_coordinates(latitude: float, longitude: float) -> Reve
             response.raise_for_status()
     except Exception as exc:
         logger.warning("Reverse geocoding request failed: %s", exc)
-        return await _reverse_geocode_nominatim(latitude, longitude)
+        return ReverseGeocodeResult()
 
     try:
         payload = response.json()
     except ValueError as exc:
         logger.warning("Reverse geocoding returned invalid JSON: %s", exc)
-        return await _reverse_geocode_nominatim(latitude, longitude)
+        return ReverseGeocodeResult()
 
     if payload.get("status") != "1":
         logger.warning("Amap geocode failed: %s", payload.get("info", "unknown"))
-        return await _reverse_geocode_nominatim(latitude, longitude)
+        return ReverseGeocodeResult()
 
     regeocode = payload.get("regeocode", {})
     address_component = regeocode.get("addressComponent", {})
@@ -273,7 +233,4 @@ async def reverse_geocode_coordinates(latitude: float, longitude: float) -> Reve
         or _normalize_text(address_component.get("country"))
     )
     address = normalize_region_text(_normalize_text(regeocode.get("formatted_address")))
-    result = ReverseGeocodeResult(city=normalize_city_name(city), address=address)
-    if result.city or result.address:
-        return result
-    return await _reverse_geocode_nominatim(latitude, longitude)
+    return ReverseGeocodeResult(city=normalize_city_name(city), address=address)

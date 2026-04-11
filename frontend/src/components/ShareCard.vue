@@ -211,9 +211,7 @@ const checkinDate = computed(() => {
 
 function normalizePosterRegion(value) {
   const normalized = normalizeAddressName(value)
-  if (!normalized) return ''
-  if (/(中国台湾|台湾|台灣)/.test(normalized)) return '台湾省'
-  return normalized
+  return normalized || ''
 }
 
 const displayCity = computed(() => normalizePosterRegion(normalizeCityName(props.checkin.city || '')))

@@ -54,6 +54,7 @@ onMounted(async () => {
 .app-main.chromeless {
   padding-top: 0;
   padding-bottom: 0;
+  overflow-y: auto;
 }
 
 .app-main.immersive {

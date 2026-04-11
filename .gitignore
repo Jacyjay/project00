@@ -20,9 +20,9 @@ backend/venv/
 backend/.venv/
 
 # ── Database & uploads ──
-*.db
-*.sqlite
-*.sqlite3
+# *.db  # 暂时允许数据库文件用于项目迁移
+# *.sqlite
+# *.sqlite3
 backend/uploads/
 
 # ── Logs & build artifacts ──
@@ -45,4 +45,4 @@ node_modules/
 frontend_node_modules_broken*/
 
 # ── Misc ──
-travel_map.db
+# travel_map.db

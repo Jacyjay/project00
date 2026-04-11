@@ -18,22 +18,6 @@
         <div class="toolbar-control-strip">
           <button
             type="button"
-            :class="['toolbar-chip', 'toolbar-control', { active: !mapDetailMode }]"
-            @click="toggleMapDisplayMode"
-          >
-            <span class="btn-icon">{{ mapDetailMode ? '📌' : '🖼️' }}</span>
-            <span class="toolbar-label">{{ mapDetailMode ? '显示坐标' : '显示详情' }}</span>
-          </button>
-          <button
-            type="button"
-            :class="['toolbar-chip', 'toolbar-control', 'toolbar-chip-search', { active: showSearchPanel }]"
-            @click="toggleSearchPanel"
-          >
-            <span class="btn-icon">🔎</span>
-            <span class="toolbar-label">搜地点</span>
-          </button>
-          <button
-            type="button"
             :class="['toolbar-chip', 'toolbar-control', { active: hotCitiesOpen }]"
             id="btn-hot-rank"
             @click="toggleHotCities"
@@ -44,6 +28,22 @@
           <button type="button" class="toolbar-button toolbar-control is-primary" @click="useCurrentLocation">
             <span class="btn-icon">🎯</span>
             <span class="toolbar-label">{{ locating ? '定位中' : '定位打卡' }}</span>
+          </button>
+          <button
+            type="button"
+            :class="['toolbar-chip', 'toolbar-control', { active: heatmapActive }]"
+            @click="toggleHeatmap"
+          >
+            <span class="btn-icon">🌡️</span>
+            <span class="toolbar-label">{{ heatmapActive ? '关闭热力' : '热力图' }}</span>
+          </button>
+          <button
+            type="button"
+            :class="['toolbar-chip', 'toolbar-control', { active: aiPanelOpen }]"
+            @click="openAiTravelPanel"
+          >
+            <span class="btn-icon">🧭</span>
+            <span class="toolbar-label">{{ aiLoading ? '生成中' : 'AI旅行建议' }}</span>
           </button>
         </div>
 
@@ -105,6 +105,21 @@
               @close="hotCitiesOpen = false"
             />
           </div>
+
+          <AiTravelPanel
+            v-else-if="aiPanelOpen"
+            key="ai-travel"
+            class="toolbar-panel-ai"
+            :loading="aiLoading"
+            :error="aiError"
+            :location-summary="aiLocationSummary"
+            :messages="chatMessages"
+            @close="closeAiPanel"
+            @new-chat="retryAiTravel"
+            @ask="handleAiTravelAsk"
+            @locate="focusAiRecommendation"
+            @checkin="startAiRecommendationCheckin"
+          />
         </transition>
       </div>
     </transition>
@@ -139,7 +154,6 @@
 
     <div ref="mapContainer" :class="['map-container', { ready: isMapReady }]" id="map-container"></div>
 
-    <!-- North/compass reset button — liquid glass on map -->
     <button
       v-if="isMapReady"
       class="btn-north"
@@ -169,7 +183,6 @@
       </div>
     </transition>
 
-    <!-- Checkin preview popup -->
     <transition name="slide-up">
       <div v-if="selectedCheckin" class="checkin-preview glass-card" id="checkin-preview">
         <button class="preview-close" @click="selectedCheckin = null" aria-label="关闭">✕</button>
@@ -241,11 +254,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
-import { getMapCheckins, searchCheckinPlaces } from '../api/checkins'
+import { getAiTravelRecommendations, streamAiTravelChat } from '../api/aiTravel'
+import { getMapCheckins } from '../api/checkins'
 import { formatCheckinDate, getImageUrl } from '../lib/checkins'
-import { convertGpsToAmap, loadAmap } from '../lib/amap'
+import { convertGpsToAmap, getCurrentAmapLocation, loadAmap, reverseGeocodeWithAmap, searchNearbyTravelPlaces } from '../lib/amap'
 import { normalizeAddressName, normalizeCityName } from '../lib/region'
 import { useUserStore } from '../stores/user'
+import { useMapStore } from '../stores/map'
+import AiTravelPanel from '../components/AiTravelPanel.vue'
 import HotCitiesPanel from '../components/HotCitiesPanel.vue'
 
 const mapContainer = ref(null)
@@ -253,16 +269,36 @@ const checkins = ref([])
 const selectedCheckin = ref(null)
 const pickMode = ref(false)
 const locating = ref(false)
-const mapDetailMode = ref(true) // true=显示详情(照片), false=显示坐标(小点)
 const mapError = ref('')
 const hotCitiesOpen = ref(false)
 const isMapReady = ref(false)
 const isCheckinsLoading = ref(true)
+const userLocationLoading = ref(false)
+const userLocation = ref(null)
 const searchKeyword = ref('')
 const searchLoading = ref(false)
 const searchError = ref('')
 const searchResults = ref([])
 const searchPanelOpen = ref(false)
+const aiPanelOpen = ref(false)
+const aiLoading = ref(false)
+const aiStreaming = ref(false)
+const aiError = ref('')
+const aiCity = ref('')
+const aiLocationSummary = ref('')
+const chatMessages = ref([])
+const aiCandidates = ref([])
+const aiOrigin = ref(null)
+const aiCandidateOriginKey = ref('')
+const aiLocationContext = ref({
+  city: '',
+  address: '',
+  current_poi_name: '',
+  current_poi_type: '',
+})
+const aiPrewarmed = ref(false)
+const aiPrewarmSource = ref('idle')
+const heatmapActive = ref(false)
 
 let map = null
 let AMapInstance = null
@@ -270,10 +306,15 @@ let markers = []
 let placeSearch = null
 let searchMarker = null
 let searchRequestId = 0
+let heatmapLayer = null
+let currentLocationMarker = null
+let currentLocationCircle = null
+let nearbyMarkers = []
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const mapStore = useMapStore()
 
 const activeUsers = computed(() =>
   new Set(checkins.value.map((c) => c.user_id)).size
@@ -328,6 +369,173 @@ function resetMapNorth() {
   if (map) map.setRotation(0)
 }
 
+function clearNearbyMarkers() {
+  if (!map || !nearbyMarkers.length) return
+  map.remove(nearbyMarkers)
+  nearbyMarkers = []
+}
+
+function clearCurrentLocationDecorations() {
+  if (!map) return
+  if (currentLocationMarker) {
+    map.remove(currentLocationMarker)
+    currentLocationMarker = null
+  }
+  if (currentLocationCircle) {
+    map.remove(currentLocationCircle)
+    currentLocationCircle = null
+  }
+  clearNearbyMarkers()
+}
+
+function renderCurrentLocationDecorations(location) {
+  if (!map || !AMapInstance || !location) return
+
+  clearCurrentLocationDecorations()
+
+  const position = [location.longitude, location.latitude]
+
+  currentLocationCircle = new AMapInstance.Circle({
+    center: position,
+    radius: 0,
+    fillOpacity: 0,
+    strokeOpacity: 0,
+    strokeWeight: 0,
+    zIndex: 0,
+  })
+
+  const initial = (userStore.user?.nickname || userStore.user?.username || '我')
+    .trim().charAt(0).toUpperCase()
+  currentLocationMarker = new AMapInstance.Marker({
+    position,
+    offset: new AMapInstance.Pixel(-20, -20),
+    content: `<div class="current-location-pin"><span class="current-location-avatar">${initial}</span></div>`,
+    zIndex: 120,
+  })
+
+  map.add([currentLocationCircle, currentLocationMarker])
+
+  nearbyMarkers = (location.nearby || []).slice(0, 4).map((place) => new AMapInstance.Marker({
+    position: [place.longitude, place.latitude],
+    offset: new AMapInstance.Pixel(-12, -12),
+    content: `<div class="nearby-poi-pin"><span class="nearby-poi-dot"></span><span class="nearby-poi-text">${place.name}</span></div>`,
+    zIndex: 110,
+  }))
+
+  if (nearbyMarkers.length) {
+    map.add(nearbyMarkers)
+  }
+}
+
+async function locateCurrentScene({ focus = true, silent = false } = {}) {
+  if (!map || !AMapInstance) return false
+
+  userLocationLoading.value = true
+
+  try {
+    const coords = await getCurrentAmapLocation({
+      timeout: 9000,
+      maximumAge: 0,
+      enableHighAccuracy: false,
+      retryWithHighAccuracy: true,
+    })
+
+    const [geoResult, nearbyResult] = await Promise.allSettled([
+      reverseGeocodeWithAmap(coords.latitude, coords.longitude),
+      searchNearbyTravelPlaces(coords.latitude, coords.longitude, {
+        radius: 1200,
+        maxResults: 6,
+        keywords: ['商圈', '步行街', '公园', '咖啡馆'],
+      }),
+    ])
+
+    const location = {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy || 0,
+      city: '',
+      address: '',
+      current_poi_name: '',
+      nearby: [],
+    }
+
+    if (geoResult.status === 'fulfilled') {
+      Object.assign(location, geoResult.value)
+    }
+    if (nearbyResult.status === 'fulfilled') {
+      location.nearby = nearbyResult.value
+    }
+
+    userLocation.value = location
+    renderCurrentLocationDecorations(location)
+
+    if (focus) {
+      map.setZoomAndCenter(Math.max(map.getZoom(), 16), [location.longitude, location.latitude])
+    }
+
+    if (userStore.isLoggedIn) {
+      prewarmAiTravel({
+        origin: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+        },
+        locationContext: {
+          city: location.city || '',
+          address: location.address || '',
+          current_poi_name: location.current_poi_name || '',
+          current_poi_type: location.current_poi_type || '',
+        },
+        candidatePois: location.nearby || [],
+        source: 'precise-location',
+      })
+    }
+
+    return true
+  } catch (error) {
+    userLocation.value = null
+    if (!silent) {
+      ElMessage.warning('暂时无法获取当前位置，已保留地图手动缩放和浏览')
+    }
+    return false
+  } finally {
+    userLocationLoading.value = false
+  }
+}
+
+function toggleHeatmap() {
+  if (!map || !AMapInstance || !isMapReady.value) return
+  if (heatmapActive.value) {
+    heatmapLayer?.hide()
+    heatmapActive.value = false
+    renderMarkers(false)
+    return
+  }
+  const data = checkins.value
+    .filter(c => c.latitude && c.longitude)
+    .map(c => ({ lng: c.longitude, lat: c.latitude, count: 1 }))
+  if (!data.length) return
+  // 关闭其他面板，隐藏所有标记，只显示热力图
+  hotCitiesOpen.value = false
+  aiPanelOpen.value = false
+  clearMarkers()
+  if (!heatmapLayer) {
+    heatmapLayer = new AMapInstance.HeatMap(map, {
+      radius: 30,
+      opacity: [0, 0.9],
+      gradient: {
+        0.3: '#1a6fd4',
+        0.55: '#16a34a',
+        0.7: '#f59e0b',
+        0.85: '#ef4444',
+        1.0: '#dc2626',
+      },
+    })
+  }
+  heatmapLayer.setDataSet({ data, max: 8 })
+  heatmapLayer.show()
+  heatmapActive.value = true
+}
+
 function clearMarkers() {
   if (!map || !markers.length) return
   map.remove(markers)
@@ -339,7 +547,7 @@ function renderMarkers(fitView = true) {
   clearMarkers()
 
   markers = checkins.value.map((checkin) => {
-    const photoUrl = mapDetailMode.value && checkin.preview_image_url
+    const photoUrl = mapStore.mapDetailMode && checkin.preview_image_url
       ? getImageUrl(checkin.preview_image_url)
       : null
 
@@ -393,11 +601,11 @@ function normalizeSearchResult(poi, index) {
   const coordinate = getPoiCoordinate(poi.location)
   if (!coordinate) return null
 
-  const city = normalizeCityName(String(poi.cityname || poi.pname || poi.adname || '').trim())
+  const city = String(poi.cityname || poi.pname || poi.adname || '').trim()
   const addressParts = [poi.pname, poi.cityname, poi.adname, poi.address]
     .map((item) => String(item || '').trim())
     .filter(Boolean)
-  const address = normalizeAddressName([...new Set(addressParts)].join(' '))
+  const address = [...new Set(addressParts)].join(' ')
 
   return {
     id: poi.id || `${poi.name || 'poi'}-${index}-${coordinate.longitude}-${coordinate.latitude}`,
@@ -413,6 +621,7 @@ function focusSearchResult(place) {
   if (!map || !AMapInstance) return
   selectedCheckin.value = null
   pickMode.value = false
+  aiPanelOpen.value = false
 
   const position = [place.longitude, place.latitude]
   map.setZoomAndCenter(Math.max(map.getZoom(), 15), position)
@@ -439,6 +648,17 @@ function closeSearchPanel() {
   clearSearchState()
 }
 
+async function runGlobalPlaceSearch(query) {
+  const trimmedQuery = String(query || '').trim()
+  if (!trimmedQuery) return
+  hotCitiesOpen.value = false
+  aiPanelOpen.value = false
+  searchPanelOpen.value = true
+  searchKeyword.value = trimmedQuery
+  await searchPlaces()
+  mapStore.clearPlaceSearchRequest()
+}
+
 async function searchPlaces() {
   if (!placeSearch || !map) {
     ElMessage.warning('地图还没准备好')
@@ -459,6 +679,7 @@ async function searchPlaces() {
   selectedCheckin.value = null
   pickMode.value = false
   hotCitiesOpen.value = false
+  aiPanelOpen.value = false
 
   try {
     const pois = await new Promise((resolve, reject) => {
@@ -475,44 +696,20 @@ async function searchPlaces() {
       .map((item, index) => normalizeSearchResult(item, index))
       .filter(Boolean)
 
-    let finalResults = normalized
-
-    if (!finalResults.length) {
-      const fallback = await searchCheckinPlaces(keyword, 8)
-      if (requestId !== searchRequestId) return
-      finalResults = Array.isArray(fallback.data) ? fallback.data : []
-    }
-
     if (requestId !== searchRequestId) return
-    searchResults.value = finalResults
+    searchResults.value = normalized
 
-    if (!finalResults.length) {
+    if (!normalized.length) {
       searchError.value = '没有找到对应地点，换个关键词试试'
       clearSearchMarker()
       return
     }
 
-    focusSearchResult(finalResults[0])
+    focusSearchResult(normalized[0])
   } catch (error) {
-    try {
-      const fallback = await searchCheckinPlaces(keyword, 8)
-      if (requestId !== searchRequestId) return
-      const finalResults = Array.isArray(fallback.data) ? fallback.data : []
-      if (requestId !== searchRequestId) return
-      searchResults.value = finalResults
-
-      if (!finalResults.length) {
-        searchError.value = '没有找到对应地点，换个关键词试试'
-        clearSearchMarker()
-        return
-      }
-
-      focusSearchResult(finalResults[0])
-    } catch (fallbackError) {
-      console.error('Place search failed:', error, fallbackError)
-      searchError.value = '地点搜索失败，请稍后重试'
-      clearSearchMarker()
-    }
+    console.error('Place search failed:', error)
+    searchError.value = '地点搜索失败，请稍后重试'
+    clearSearchMarker()
   } finally {
     searchLoading.value = false
   }
@@ -539,9 +736,10 @@ async function initMapAndLoad() {
   try {
     await initMap()
     await checkinsPromise
+    const located = await locateCurrentScene({ focus: true, silent: true })
     if (map) {
       requestAnimationFrame(() => {
-        renderMarkers()
+        renderMarkers(!located)
       })
     }
   } catch (error) {
@@ -564,32 +762,348 @@ function startPickMode() {
     return
   }
   closeSearchPanel()
+  closeAiPanel()
   pickMode.value = true
   selectedCheckin.value = null
   ElMessage.info('点击地图任意位置开始打卡')
 }
 
-function toggleMapDisplayMode() {
-  mapDetailMode.value = !mapDetailMode.value
-  renderMarkers(false) // 切换模式时保持当前缩放级别和中心点
-}
-
 function toggleHotCities() {
   if (!hotCitiesOpen.value) {
     closeSearchPanel()
+    closeAiPanel()
   }
   hotCitiesOpen.value = !hotCitiesOpen.value
 }
 
-function toggleSearchPanel() {
-  if (showSearchPanel.value) {
-    closeSearchPanel()
-    return
+/**
+ * 静默预热：地图就绪后在后台提前请求豆包并缓存结果。
+ * 用户打开 AI 面板时直接显示，无需等待。
+ */
+async function prewarmAiTravel(options = {}) {
+  if (!userStore.isLoggedIn || chatMessages.value.length) return
+
+  const requestedSource = options.source || 'map-center'
+  const canOverrideExisting =
+    requestedSource === 'precise-location' && aiPrewarmSource.value !== 'precise-location'
+
+  if (aiPrewarmed.value && !canOverrideExisting) return
+
+  aiPrewarmed.value = true
+  aiPrewarmSource.value = requestedSource
+
+  try {
+    const origin = options.origin || getMapCenterPoint()
+    if (!origin) return
+
+    aiOrigin.value = origin
+
+    let locationContext = {
+      city: '',
+      address: '',
+      current_poi_name: '',
+      current_poi_type: '',
+      ...(options.locationContext || {}),
+    }
+    let candidatePois = Array.isArray(options.candidatePois) ? options.candidatePois : []
+
+    const needsGeo = !locationContext.city && !locationContext.address && !locationContext.current_poi_name
+    const needsPois = !candidatePois.length
+
+    if (needsGeo || needsPois) {
+      try {
+        const tasks = []
+        if (needsGeo) {
+          tasks.push(reverseGeocodeWithAmap(origin.latitude, origin.longitude))
+        } else {
+          tasks.push(Promise.resolve(null))
+        }
+        if (needsPois) {
+          tasks.push(searchNearbyTravelPlaces(origin.latitude, origin.longitude, { radius: 3500, maxResults: 10 }))
+        } else {
+          tasks.push(Promise.resolve(null))
+        }
+
+        const [geoResult, poisResult] = await Promise.allSettled(tasks)
+
+        if (geoResult.status === 'fulfilled' && geoResult.value) {
+          locationContext = { ...locationContext, ...geoResult.value }
+        }
+        if (poisResult.status === 'fulfilled' && Array.isArray(poisResult.value) && poisResult.value.length) {
+          candidatePois = poisResult.value
+        }
+      } catch {}
+    }
+
+    aiLocationContext.value = locationContext
+    const originKey = `${origin.latitude.toFixed(3)}:${origin.longitude.toFixed(3)}`
+    aiCandidates.value = candidatePois
+    aiCandidateOriginKey.value = originKey
+
+    const response = await getAiTravelRecommendations({
+      latitude: origin.latitude,
+      longitude: origin.longitude,
+      city: locationContext.city,
+      address: locationContext.address,
+      current_poi_name: locationContext.current_poi_name,
+      current_poi_type: locationContext.current_poi_type,
+      query: '推荐附近适合游玩和打卡的地方',
+      candidate_pois: candidatePois,
+      history: [],
+    })
+
+    const payload = response.data || {}
+
+    // 只在用户还未打开面板时填充，避免覆盖用户已有的对话
+    if (!chatMessages.value.length && !aiPanelOpen.value) {
+      aiLocationSummary.value = payload.location_summary || ''
+      aiCity.value = payload.location_summary?.split(' · ')[0] || ''
+      aiCandidates.value = payload.candidate_pois || []
+      chatMessages.value.push({
+        id: Date.now(),
+        role: 'assistant',
+        type: 'recommendations',
+        summary: payload.summary || '',
+        recommendations: payload.recommendations || [],
+      })
+    }
+  } catch {
+    // 预热失败静默处理，下次点开面板再正常请求
+    aiPrewarmed.value = false
+    aiPrewarmSource.value = 'idle'
   }
+}
+
+function closeAiPanel() {
+  aiPanelOpen.value = false
+  aiError.value = ''
+  aiCity.value = ''
+  aiLocationSummary.value = ''
+  chatMessages.value = []
+  aiCandidates.value = []
+  aiStreaming.value = false
+  aiOrigin.value = null
+  aiCandidateOriginKey.value = ''
+  aiPrewarmSource.value = 'idle'
+  aiLocationContext.value = {
+    city: '',
+    address: '',
+    current_poi_name: '',
+    current_poi_type: '',
+  }
+}
+
+function getMapCenterPoint() {
+  if (!map) return null
+  const center = map.getCenter?.()
+  if (!center) return null
+  const longitude = typeof center.lng === 'number' ? center.lng : center.getLng?.()
+  const latitude = typeof center.lat === 'number' ? center.lat : center.getLat?.()
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return null
+  return { latitude, longitude }
+}
+
+async function getAiOriginPoint() {
+  const mapCenter = getMapCenterPoint()
+
+  if (!navigator.geolocation) {
+    return mapCenter
+  }
+
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 0,
+      })
+    })
+
+    try {
+      return await convertGpsToAmap(position.coords.longitude, position.coords.latitude)
+    } catch {
+      return {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      }
+    }
+  } catch {
+    return mapCenter
+  }
+}
+
+async function requestAiTravel(query) {
+  aiLoading.value = true
+  aiError.value = ''
+
+  try {
+    const origin = aiOrigin.value || await getAiOriginPoint()
+    if (!origin) {
+      throw new Error('暂时无法获取当前位置，请移动地图后重试')
+    }
+
+    aiOrigin.value = origin
+    let locationContext = { ...aiLocationContext.value }
+    try {
+      locationContext = {
+        ...locationContext,
+        ...(await reverseGeocodeWithAmap(origin.latitude, origin.longitude)),
+      }
+      aiLocationContext.value = locationContext
+    } catch (error) {
+      console.warn('AI 旅行建议前端逆地理解析失败，回退到后端上下文', error)
+    }
+
+    const originKey = `${origin.latitude.toFixed(3)}:${origin.longitude.toFixed(3)}`
+    let candidatePois = aiCandidates.value
+    if (!candidatePois.length || aiCandidateOriginKey.value !== originKey) {
+      try {
+        candidatePois = await searchNearbyTravelPlaces(origin.latitude, origin.longitude, {
+          radius: 3500,
+          maxResults: 10,
+        })
+        aiCandidates.value = candidatePois
+        aiCandidateOriginKey.value = originKey
+      } catch (error) {
+        console.warn('AI 旅行建议前端周边地点获取失败，回退到后端候选检索', error)
+      }
+    }
+
+    const response = await getAiTravelRecommendations({
+      latitude: origin.latitude,
+      longitude: origin.longitude,
+      city: locationContext.city,
+      address: locationContext.address,
+      current_poi_name: locationContext.current_poi_name,
+      current_poi_type: locationContext.current_poi_type,
+      query,
+      candidate_pois: candidatePois,
+      history: [],
+    })
+    const payload = response.data || {}
+
+    aiLocationSummary.value = payload.location_summary || ''
+    aiCity.value = payload.location_summary?.split(' · ')[0] || ''
+    aiCandidates.value = payload.candidate_pois || []
+
+    // Push structured recommendation message into chat
+    chatMessages.value.push({
+      id: Date.now(),
+      role: 'assistant',
+      type: 'recommendations',
+      summary: payload.summary || '',
+      recommendations: payload.recommendations || [],
+    })
+    return true
+  } catch (error) {
+    console.error('AI travel failed:', error)
+    aiError.value = error.response?.data?.detail || error.message || 'AI旅行建议生成失败，请稍后重试'
+    return false
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function openAiTravelPanel() {
+  closeSearchPanel()
   hotCitiesOpen.value = false
-  searchPanelOpen.value = true
   selectedCheckin.value = null
   pickMode.value = false
+  aiPanelOpen.value = true
+
+  if (chatMessages.value.length && !aiError.value) {
+    return
+  }
+
+  chatMessages.value = []
+  await requestAiTravel('推荐附近适合游玩和打卡的地方')
+}
+
+async function retryAiTravel() {
+  chatMessages.value = []
+  aiError.value = ''
+  aiStreaming.value = false
+  await requestAiTravel('推荐附近适合游玩和打卡的地方')
+}
+
+async function handleAiTravelAsk(query) {
+  const q = String(query || '').trim()
+  if (!q || aiLoading.value || aiStreaming.value) return
+
+  // Add user bubble
+  chatMessages.value.push({ id: Date.now(), role: 'user', content: q })
+
+  // Add empty AI bubble that will fill via streaming
+  const aiMsgId = Date.now() + 1
+  chatMessages.value.push({ id: aiMsgId, role: 'assistant', type: 'chat', content: '', streaming: true })
+  aiStreaming.value = true
+
+  // Build text-only history from chat (exclude recommendation cards)
+  const history = chatMessages.value
+    .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.type === 'chat' && m.content))
+    .slice(0, -2) // exclude the new user msg and empty AI msg just added
+    .slice(-6)
+    .map((m) => ({ role: m.role, content: m.content || '' }))
+
+  try {
+    await streamAiTravelChat(
+      {
+        location_summary: aiLocationSummary.value,
+        query: q,
+        history,
+      },
+      {
+        onChunk: (chunk) => {
+          const msg = chatMessages.value.find((m) => m.id === aiMsgId)
+          if (msg) msg.content += chunk
+        },
+        onDone: () => {
+          const msg = chatMessages.value.find((m) => m.id === aiMsgId)
+          if (msg) msg.streaming = false
+          aiStreaming.value = false
+        },
+        onError: (errMsg) => {
+          const msg = chatMessages.value.find((m) => m.id === aiMsgId)
+          if (msg) {
+            msg.content = msg.content || `豆包响应出错：${errMsg}`
+            msg.streaming = false
+          }
+          aiStreaming.value = false
+        },
+      },
+    )
+  } catch (err) {
+    console.error('AI chat stream error:', err)
+    const msg = chatMessages.value.find((m) => m.id === aiMsgId)
+    if (msg) {
+      msg.content = msg.content || '豆包响应失败，请稍后重试'
+      msg.streaming = false
+    }
+    aiStreaming.value = false
+  }
+}
+
+function focusAiRecommendation(place) {
+  if (!map || !AMapInstance) return
+
+  const position = [place.longitude, place.latitude]
+  map.setZoomAndCenter(Math.max(map.getZoom(), 15), position)
+  clearSearchMarker()
+  searchMarker = new AMapInstance.Marker({
+    position,
+    offset: new AMapInstance.Pixel(-18, -42),
+    content: '<div class="search-pin"><span class="search-pin-core"></span></div>',
+  })
+  map.add(searchMarker)
+}
+
+async function startAiRecommendationCheckin(place) {
+  focusAiRecommendation(place)
+  await pushToCheckinForm(place.latitude, place.longitude, 'ai-travel', {
+    city: aiCity.value,
+    address: place.address,
+    location_name: place.name,
+  })
 }
 
 async function pushToCheckinForm(latitude, longitude, source, details = {}) {
@@ -685,6 +1199,7 @@ function useCurrentLocation() {
 
   // Update UI after starting the request
   closeSearchPanel()
+  closeAiPanel()
   locating.value = true
   pickMode.value = false
 }
@@ -692,6 +1207,7 @@ function useCurrentLocation() {
 function destroyMap() {
   clearMarkers()
   clearSearchMarker()
+  clearCurrentLocationDecorations()
   if (map) {
     map.off('click', handleMapClick)
     map.off('complete', handleMapComplete)
@@ -700,6 +1216,8 @@ function destroyMap() {
   }
   AMapInstance = null
   placeSearch = null
+  heatmapLayer = null
+  heatmapActive.value = false
   isMapReady.value = false
   selectedCheckin.value = null
 }
@@ -714,6 +1232,27 @@ watch(
   async () => { await consumePickQuery() }
 )
 
+watch(
+  () => mapStore.pendingPlaceSearchNonce,
+  async () => {
+    if (route.name !== 'home') return
+    await runGlobalPlaceSearch(mapStore.pendingPlaceSearchQuery)
+  },
+  { immediate: true }
+)
+
+// Re-render markers when display mode changes
+watch(() => mapStore.mapDetailMode, () => {
+  renderMarkers(false)
+})
+
+// 从其他页面登录后跳回主页时，如果地图已就绪则触发预热
+watch(() => userStore.isLoggedIn, (loggedIn) => {
+  if (loggedIn && isMapReady.value && !userLocation.value) {
+    setTimeout(() => prewarmAiTravel({ source: 'map-center' }), 500)
+  }
+})
+
 onBeforeUnmount(() => { destroyMap() })
 </script>
 
@@ -722,7 +1261,7 @@ onBeforeUnmount(() => { destroyMap() })
   height: 100%;
   width: 100%;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
   background: var(--bg-base);
 }
 
@@ -738,10 +1277,10 @@ onBeforeUnmount(() => { destroyMap() })
 
 /* ─── North/compass reset button — liquid glass (map dark-surface variant) ── */
 .btn-north {
-  position: fixed;
-  top: 76px; /* below the header (~60px) + 16px gap */
+  position: absolute;
+  top: 74px;
   right: 16px;
-  z-index: 900;
+  z-index: 40;
 
   width: 40px;
   height: 40px;
@@ -866,9 +1405,9 @@ onBeforeUnmount(() => { destroyMap() })
 
 .map-sync-chip {
   position: absolute;
-  top: 78px;
+  top: 74px;
   left: 50%;
-  z-index: 1001;
+  z-index: 35;
   transform: translateX(-50%);
   padding: 10px 16px;
   font-size: 13px;
@@ -1193,6 +1732,76 @@ onBeforeUnmount(() => { destroyMap() })
   font-size: 13px;
 }
 
+:deep(.current-location-pin) {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+}
+
+:deep(.current-location-pin::before) {
+  display: none;
+}
+
+:deep(.current-location-avatar) {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #E85D04, #f4a261);
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 4px 16px rgba(232, 93, 4, 0.40), 0 0 0 3px rgba(232, 93, 4, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--font-body);
+  line-height: 1;
+  user-select: none;
+}
+
+:deep(.nearby-poi-pin) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 10px 30px rgba(34, 20, 8, 0.14);
+  color: var(--ink-700);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+:deep(.nearby-poi-dot) {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+:deep(.nearby-poi-text) {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes currentLocationPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
 /* Map error */
 .map-error-banner {
   position: absolute;
@@ -1212,10 +1821,10 @@ onBeforeUnmount(() => { destroyMap() })
 /* Checkin preview */
 .checkin-preview {
   position: absolute;
-  left: 16px;
-  bottom: 108px;
+  left: 14px;
+  top: 160px;
   z-index: 1001;
-  width: 340px;
+  width: min(356px, calc(100% - 28px));
   overflow: hidden;
 }
 
@@ -1342,6 +1951,10 @@ onBeforeUnmount(() => { destroyMap() })
   background: var(--bg-surface);
   border: 1px solid var(--ink-100);
   box-shadow: var(--shadow-card);
+}
+
+.toolbar-panel-ai {
+  overflow: hidden;
 }
 
 .toolbar-panel-hot {
@@ -1698,7 +2311,7 @@ onBeforeUnmount(() => { destroyMap() })
   }
 
   .map-sync-chip {
-    top: 72px;
+    top: 126px;
     max-width: calc(100% - 24px);
   }
 
@@ -1739,6 +2352,13 @@ onBeforeUnmount(() => { destroyMap() })
     border-radius: var(--radius-md);
   }
 
+  .toolbar-panel-ai {
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+
   .place-search-header {
     gap: 10px;
   }
@@ -1776,10 +2396,10 @@ onBeforeUnmount(() => { destroyMap() })
   }
 
   .checkin-preview {
-    left: 16px;
-    right: 16px;
+    left: 10px;
+    right: 10px;
     width: auto;
-    bottom: 104px;
+    top: 146px;
   }
 
   .checkin-preview .preview-image-wrap {
@@ -1800,10 +2420,10 @@ onBeforeUnmount(() => { destroyMap() })
   }
 
   .pick-hint {
-    left: 16px;
-    right: 16px;
+    left: 10px;
+    right: 10px;
     max-width: none;
-    bottom: 104px;
+    bottom: 10px;
   }
 
 }
